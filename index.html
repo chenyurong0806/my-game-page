@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的游戏合集</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background: #f0f2f5; margin: 0; padding: 20px; }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .hidden { display: none; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 4px; }
+        input { padding: 10px; font-size: 16px; width: 150px; text-align: center; }
+        .game-box { margin-top: 20px; padding: 20px; border: 2px dashed #ccc; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div id="home-view">
+        <h1>🎮 欢迎来到游戏合集</h1>
+        <p>选择一个游戏开始：</p>
+        <button onclick="navigateTo('/clicker')">点点乐联机版 (Clicker)</button>
+    </div>
+
+    <div id="lobby-view" class="hidden">
+        <h1 id="lobby-title">游戏大厅</h1>
+        <p>设置最大玩家人数：</p>
+        <input type="number" id="max-players" value="2" min="2" max="10">
+        <br><br>
+        <button onclick="createRoom()">创建新房间</button>
+        <br><br>
+        <button onclick="navigateTo('/')" style="background:#6c757d;">返回首页</button>
+    </div>
+
+    <div id="room-view" class="hidden">
+        <h2 id="room-title">房间</h2>
+        <div class="game-box">
+            <h3>看谁点得快！</h3>
+            <p>当前房间人数: <span id="current-count">0</span> / <span id="max-count">0</span></p>
+            <p>当前分数: <span id="game-score">0</span></p>
+            <button id="click-btn" onclick="sendClick()" disabled>等待所有人加入...</button>
+        </div>
+        <br>
+        <button onclick="navigateTo('/')" style="background:#dc3545;">退出房间</button>
+    </div>
+</div>
+
+<script>
+    let socket = null;
+    let currentGame = "";
+    let currentRoom = "";
+
+    // 路由解析引擎
+    function route() {
+        const path = window.location.pathname;
+        const parts = path.split('/').filter(Boolean); // 分割 URL
+
+        // 隐藏所有界面
+        document.getElementById('home-view').classList.add('hidden');
+        document.getElementById('lobby-view').classList.add('hidden');
+        document.getElementById('room-view').classList.add('hidden');
+        if(socket) { socket.close(); }
+
+        if (parts.length === 0) {
+            // 首页: /
+            document.getElementById('home-view').classList.remove('hidden');
+        } else if (parts.length === 1) {
+            // 游戏大厅: /游戏名
+            currentGame = parts[0];
+            document.getElementById('lobby-view').classList.remove('hidden');
+            document.getElementById('lobby-title').innerText = `准备玩：${currentGame}`;
+        } else if (parts.length === 2) {
+            // 游戏房间: /游戏名/房间号
+            currentGame = parts[0];
+            currentRoom = parts[1];
+            document.getElementById('room-view').classList.remove('hidden');
+            document.getElementById('room-title').innerText = `游戏: ${currentGame} | 房间号: ${currentRoom}`;
+            initWebSocket();
+        }
+    }
+
+    // 页面跳转函数
+    function navigateTo(url) {
+        window.history.pushState(null, null, url);
+        route();
+    }
+
+    // 监听浏览器前进/后退
+    window.onpopstate = route;
+    // 首次加载页面时执行路由
+    window.onload = route;
+
+    // 创建房间：随机生成房间号并跳转
+    function createRoom() {
+        const maxPlayers = document.getElementById('max-players').value;
+        const randomRoomId = Math.random().toString(36).substring(2, 7);
+        // 将最大人数通过 URL 参数或者后续发给后端，这里为了简单，我们组合到 URL 中
+        navigateTo(`/${currentGame}/${randomRoomId}?max=${maxPlayers}`);
+    }
+
+    // --- 联机逻辑 ---
+    function initWebSocket() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const max = urlParams.get('max') || 2;
+        
+        // 这里的后端地址在第二步创建 Workers 后替换
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+        // 暂时用相对路径，Cloudflare Pages 绑定 Workers 后可直接请求 /api/room
+        socket = new WebSocket(`${wsProtocol}${window.location.host}/api/room?game=${currentGame}&room=${currentRoom}&max=${max}`);
+
+        socket.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === 'status') {
+                document.getElementById('current-count').innerText = data.current;
+                document.getElementById('max-count').innerText = data.max;
+                
+                // 人数满了才能开始点
+                if (data.current >= data.max) {
+                    document.getElementById('click-btn').disabled = false;
+                    document.getElementById('click-btn').innerText = "点我加分！";
+                }
+            } else if (data.type === 'update') {
+                document.getElementById('game-score').innerText = data.score;
+            }
+        };
+    }
+
+    function sendClick() {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ action: 'click' }));
+        }
+    }
+</script>
+</body>
+</html>
