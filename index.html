@@ -108,22 +108,70 @@
         // 暂时用相对路径，Cloudflare Pages 绑定 Workers 后可直接请求 /api/room
         socket = new WebSocket(`${wsProtocol}${window.location.host}/api/room?game=${currentGame}&room=${currentRoom}&max=${max}`);
 
-        socket.onmessage = function(event) {
-            const data = JSON.parse(event.data);
-            
-            if (data.type === 'status') {
-                document.getElementById('current-count').innerText = data.current;
-                document.getElementById('max-count').innerText = data.max;
+        let currentPlayers = 1; // 默认自己进房时是 1 个人
+        let maxPlayersAllowed = 2; // 默认限制
+        
+        function initWebSocket() {
+            const urlParams = new URLSearchParams(window.location.search);
+            maxPlayersAllowed = parseInt(urlParams.get('max') || 2);
+            document.getElementById('max-count').innerText = maxPlayersAllowed;
+            document.getElementById('current-count').innerText = currentPlayers;
+        
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+            socket = new WebSocket(`${wsProtocol}${window.location.host}/api/room?game=${currentGame}&room=${currentRoom}`);
+        
+            socket.onopen = function() {
+                // 刚连上时，向房间内广播：“有人进房了！”
+                socket.send(JSON.stringify({ type: 'join' }));
+            };
+        
+            socket.onmessage = function(event) {
+                const data = JSON.parse(event.data);
                 
-                // 人数满了才能开始点
-                if (data.current >= data.max) {
-                    document.getElementById('click-btn').disabled = false;
-                    document.getElementById('click-btn').innerText = "点我加分！";
+                if (data.type === 'join') {
+                    // 收到别人进房的消息，人数加 1
+                    currentPlayers++;
+                    if(currentPlayers > maxPlayersAllowed) currentPlayers = maxPlayersAllowed;
+                    document.getElementById('current-count').innerText = currentPlayers;
+                    
+                    // 告诉新来的人：“我也在房间里，而且现在的分数是 xx”
+                    socket.send(JSON.stringify({ 
+                        type: 'sync', 
+                        count: currentPlayers, 
+                        score: document.getElementById('game-score').innerText 
+                    }));
+                    
+                    // 激活按钮
+                    if (currentPlayers >= maxPlayersAllowed) {
+                        document.getElementById('click-btn').disabled = false;
+                        document.getElementById('click-btn').innerText = "点我加分！";
+                    }
+                } 
+                else if (data.type === 'sync') {
+                    // 同步老玩家发来的人数和分数
+                    currentPlayers = data.count;
+                    document.getElementById('current-count').innerText = currentPlayers;
+                    document.getElementById('game-score').innerText = data.score;
+                    if (currentPlayers >= maxPlayersAllowed) {
+                        document.getElementById('click-btn').disabled = false;
+                        document.getElementById('click-btn').innerText = "点我加分！";
+                    }
                 }
-            } else if (data.type === 'update') {
-                document.getElementById('game-score').innerText = data.score;
+                else if (data.type === 'update') {
+                    // 收到分数的实时更新
+                    document.getElementById('game-score').innerText = data.score;
+                }
+            };
+        }
+        
+        // 修改点击按钮发出的消息
+        function sendClick() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                const currentScore = parseInt(document.getElementById('game-score').innerText) + 1;
+                // 把最新的全房分数广播出去
+                socket.send(JSON.stringify({ type: 'update', score: currentScore }));
             }
-        };
+        }
     }
 
     function sendClick() {
