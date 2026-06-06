@@ -153,22 +153,21 @@
     </div>
 
     <script>
-        // 【核心路由与联机逻辑保持一致，完美兼容后端 Cloudflare Functions】
         const GAME_CONFIGS = {
             'click-race': { name: '🏎️ 点击速度大赛', rules: '游戏开始后，双方玩家疯狂点击下方红蓝巨型按钮。每次点击都会为你的能量条充能，率先冲满 30 次的用户直接获胜！' }
         };
-
+        
         let currentPath = '';
         let pollingInterval = null;
         let myRole = null;
-
+        
         function route() {
             clearInterval(pollingInterval);
             currentPath = window.location.pathname;
             const parts = currentPath.split('/').filter(Boolean);
-
+        
             document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-
+        
             if (parts.length === 0) {
                 document.getElementById('view-home').classList.add('active');
             } else if (parts.length === 1) {
@@ -185,14 +184,14 @@
                 initGameRoom(parts[0], parts[1]);
             }
         }
-
+        
         function navigateTo(path) {
             window.history.pushState({}, '', path);
             route();
         }
         window.onpopstate = route;
         window.onload = route;
-
+        
         async function fetchRooms(gameId) {
             const ul = document.getElementById('room-list');
             ul.innerHTML = '<p style="text-align:center; padding: 20px;">正在探测时空房间...</p>';
@@ -214,9 +213,9 @@
                     `;
                     ul.appendChild(li);
                 });
-            } catch(e) { ul.innerHTML = '<p style="text-align:center; color:#ef4444;">未检测到绑定的云端 KV 数据库</p>'; }
+            } catch(e) { ul.innerHTML = '<p style="text-align:center; color:#ef4444;">网络或数据库绑定异常</p>'; }
         }
-
+        
         async function createRoom() {
             const gameId = window.location.pathname.split('/').filter(Boolean)[0];
             const res = await fetch('/api/room?action=create', {
@@ -225,9 +224,11 @@
                 body: JSON.stringify({ gameId })
             });
             const data = await res.json();
+            // 【核心修复】创建完成的瞬间，立刻本地锁死房主身份
+            localStorage.setItem(`room_${data.roomId}_role`, 'p1');
             navigateTo(`/${gameId}/${data.roomId}`);
         }
-
+        
         function initGameRoom(gameId, roomId) {
             document.getElementById('game-title').innerText = `房间 #${roomId}`;
             myRole = localStorage.getItem(`room_${roomId}_role`) || null;
@@ -235,39 +236,38 @@
             pollRoomStatus(gameId, roomId);
             pollingInterval = setInterval(() => pollRoomStatus(gameId, roomId), 1000);
         }
-
+        
         async function pollRoomStatus(gameId, roomId) {
-            const res = await fetch(`/api/room?action=status&roomId=${roomId}`);
+            // 【核心修复】请求带上 gameId，让后端可以执行强一致性直接获取
+            const res = await fetch(`/api/room?action=status&roomId=${roomId}&gameId=${gameId}`);
             if (res.status === 404) {
-                alert('房间已被销毁');
+                alert('房间已被销毁或不存在');
                 navigateTo(`/${gameId}`);
                 return;
             }
             const room = await res.json();
-
+        
             if (!myRole) {
                 if (!room.p1) { myRole = 'p1'; } 
                 else if (!room.p2) { myRole = 'p2'; } 
                 else { myRole = 'audience'; }
                 localStorage.setItem(`room_${roomId}_role`, myRole);
             }
-
+        
             const roleNames = { 'p1': '⚡ 房主 (P1)', 'p2': '🎯 挑战者 (P2)', 'audience': '👁️ 赛事观察员 (观众)' };
             document.getElementById('player-identity').innerText = roleNames[myRole];
             
-            // 更新数字分数
             const s1 = room.p1Score || 0;
             const s2 = room.p2Score || 0;
             document.getElementById('p1-score').innerText = `${s1} / 30`;
             document.getElementById('p2-score').innerText = `${s2} / 30`;
-
-            // 【高光改进】动态计算并更新能量进度条
+        
             document.getElementById('p1-bar').style.width = `${Math.min((s1 / 30) * 100, 100)}%`;
             document.getElementById('p2-bar').style.width = `${Math.min((s2 / 30) * 100, 100)}%`;
-
+        
             const btn = document.getElementById('click-btn');
             const statusText = document.getElementById('game-status');
-
+        
             if (room.status === 'waiting') {
                 statusText.innerText = '⏳ 等待挑战者扫描并进入房间...';
                 btn.disabled = true;
@@ -275,7 +275,7 @@
                     await fetch('/api/room?action=join', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ roomId })
+                        body: JSON.stringify({ roomId, gameId }) // 传入 gameId
                     });
                 }
             } else if (room.status === 'playing') {
@@ -290,12 +290,13 @@
                 clearInterval(pollingInterval);
             }
         }
-
+        
         async function sendClick() {
             if (myRole !== 'p1' && myRole !== 'p2') return;
             const parts = window.location.pathname.split('/').filter(Boolean);
+            const gameId = parts[0];
+            const roomId = parts[1];
             
-            // 前端先做预增，让连击视觉完全不卡顿（乐观更新）
             if(myRole === 'p1') {
                 let current = parseInt(document.getElementById('p1-score').innerText) + 1;
                 document.getElementById('p1-score').innerText = `${current} / 30`;
@@ -305,14 +306,14 @@
                 document.getElementById('p2-score').innerText = `${current} / 30`;
                 document.getElementById('p2-bar').style.width = `${(current / 30) * 100}%`;
             }
-
+        
             await fetch('/api/room?action=click', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ roomId: parts[1], player: myRole })
+                body: JSON.stringify({ roomId, gameId, player: myRole }) // 传入 gameId
             });
         }
-
+        
         function leaveRoom() {
             const parts = window.location.pathname.split('/').filter(Boolean);
             navigateTo(`/${parts[0]}`);
