@@ -5,12 +5,9 @@ export async function onRequest(context) {
     const gameId = url.searchParams.get('gameId');
     const roomId = url.searchParams.get('roomId');
 
-    // 【核心修复】定义绝对禁止缓存的响应头，彻底击碎浏览器和CDN缓存
     const headers = {
         'Content-Type': 'application/json',
         'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
-        'Pragma': 'no-cache',
-        'Expires': '0'
     };
 
     if (!env.GAME_KV) {
@@ -19,7 +16,7 @@ export async function onRequest(context) {
 
     // 1. 获取房间列表
     if (action === 'list' && request.method === 'GET') {
-        const list = await env.GAME_KV.list({ prefix: `room:${gameId}:` });
+        const list = await env.GAME_KV.list({ prefix: `room:${gameId}:meta:` });
         const rooms = [];
         for (const key of list.keys) {
             const val = await env.GAME_KV.get(key.name, { type: 'json' });
@@ -28,70 +25,95 @@ export async function onRequest(context) {
         return new Response(JSON.stringify(rooms), { headers });
     }
 
-    // 2. 创建新房间
+    // 2. 创建新房间（解耦存储：元数据与分数独立）
     if (action === 'create' && request.method === 'POST') {
         const { gameId: bodyGameId } = await request.json();
         const randomRoomId = Math.floor(100000 + Math.random() * 900000).toString();
-        const newRoom = {
-            id: randomRoomId,
-            gameId: bodyGameId,
-            status: 'waiting',
-            p1: 'joined',
-            p2: null,
-            p1Score: 0,
-            p2Score: 0,
-            winner: null
-        };
-        await env.GAME_KV.put(`room:${bodyGameId}:${randomRoomId}`, JSON.stringify(newRoom), { expirationTtl: 3600 });
+        
+        const metaKey = `room:${bodyGameId}:meta:${randomRoomId}`;
+        const p1Key = `room:${bodyGameId}:score:${randomRoomId}:p1`;
+        const p2Key = `room:${bodyGameId}:score:${randomRoomId}:p2`;
+
+        const meta = { id: randomRoomId, gameId: bodyGameId, status: 'waiting', p1: 'joined', p2: null, winner: null };
+        
+        // 并行初始化写入
+        await Promise.all([
+            env.GAME_KV.put(metaKey, JSON.stringify(meta), { expirationTtl: 3600 }),
+            env.GAME_KV.put(p1Key, "0", { expirationTtl: 3600 }),
+            env.GAME_KV.put(p2Key, "0", { expirationTtl: 3600 })
+        ]);
+
         return new Response(JSON.stringify({ roomId: randomRoomId }), { headers });
     }
 
     // 3. 加入房间 (P2 进入)
     if (action === 'join' && request.method === 'POST') {
         const { roomId: bodyRoomId, gameId: bodyGameId } = await request.json();
-        const kvKey = `room:${bodyGameId}:${bodyRoomId}`;
+        const metaKey = `room:${bodyGameId}:meta:${bodyRoomId}`;
         
-        const room = await env.GAME_KV.get(kvKey, { type: 'json' });
-        if (!room) return new Response(JSON.stringify({ error: "房间不存在" }), { status: 404, headers });
+        const meta = await env.GAME_KV.get(metaKey, { type: 'json' });
+        if (!meta) return new Response(JSON.stringify({ error: "房间不存在" }), { status: 404, headers });
 
-        if (room.status === 'waiting') {
-            room.p2 = 'joined';
-            room.status = 'playing'; 
-            await env.GAME_KV.put(kvKey, JSON.stringify(room), { expirationTtl: 3600 });
+        if (meta.status === 'waiting') {
+            meta.p2 = 'joined';
+            meta.status = 'playing'; 
+            await env.GAME_KV.put(metaKey, JSON.stringify(meta), { expirationTtl: 3600 });
         }
-        return new Response(JSON.stringify(room), { headers });
+        return new Response(JSON.stringify(meta), { headers });
     }
 
-    // 4. 获取单个房间状态 (精准 GET)
+    // 4. 获取单个房间状态 (多键值联合精准获取)
     if (action === 'status' && request.method === 'GET') {
-        const kvKey = `room:${gameId}:${roomId}`;
-        const room = await env.GAME_KV.get(kvKey, { type: 'json' });
-        if (!room) return new Response(JSON.stringify({ error: "房间不存在" }), { status: 404, headers });
-        return new Response(JSON.stringify(room), { headers });
+        const metaKey = `room:${gameId}:meta:${roomId}`;
+        const p1Key = `room:${gameId}:score:${roomId}:p1`;
+        const p2Key = `room:${gameId}:score:${roomId}:p2`;
+
+        const [meta, p1ScoreStr, p2ScoreStr] = await Promise.all([
+            env.GAME_KV.get(metaKey, { type: 'json' }),
+            env.GAME_KV.get(p1Key),
+            env.GAME_KV.get(p2Key)
+        ]);
+
+        if (!meta) return new Response(JSON.stringify({ error: "房间不存在" }), { status: 404, headers });
+
+        // 组装最新状态返回前端
+        const roomData = {
+            ...meta,
+            p1Score: parseInt(p1ScoreStr || "0", 10),
+            p2Score: parseInt(p2ScoreStr || "0", 10)
+        };
+        return new Response(JSON.stringify(roomData), { headers });
     }
 
-    // 5. 核心对战逻辑：点击动作
+    // 5. 核心防踩踏对抗逻辑：绝对值自增上报
     if (action === 'click' && request.method === 'POST') {
-        const { roomId: bodyRoomId, gameId: bodyGameId, player } = await request.json();
-        const kvKey = `room:${bodyGameId}:${bodyRoomId}`;
+        const { roomId: bodyRoomId, gameId: bodyGameId, player, totalClicks } = await request.json();
+        
+        const metaKey = `room:${bodyGameId}:meta:${bodyRoomId}`;
+        const scoreKey = `room:${bodyGameId}:score:${bodyRoomId}:${player}`;
 
-        const room = await env.GAME_KV.get(kvKey, { type: 'json' });
-        if (!room) return new Response(JSON.stringify({ error: "房间不存在" }), { status: 404, headers });
-        if (room.status !== 'playing') return new Response(JSON.stringify({ error: "游戏未开始或已结束" }), { status: 400, headers });
+        const [currentScoreStr, meta] = await Promise.all([
+            env.GAME_KV.get(scoreKey),
+            env.GAME_KV.get(metaKey, { type: 'json' })
+        ]);
 
-        if (player === 'p1') room.p1Score += 1;
-        if (player === 'p2') room.p2Score += 1;
+        if (!meta) return new Response(JSON.stringify({ error: "房间不存在" }), { status: 404, headers });
+        if (meta.status !== 'playing') return new Response(JSON.stringify({ error: "游戏未在进行中" }), { status: 400, headers });
 
-        if (room.p1Score >= 30) {
-            room.status = 'finished';
-            room.winner = 'p1';
-        } else if (room.p2Score >= 30) {
-            room.status = 'finished';
-            room.winner = 'p2';
+        const currentScore = parseInt(currentScoreStr || "0", 10);
+
+        // 【强力防倒退保护】只有当前前端上报的绝对值大于云端已有值，才被允许写入
+        if (totalClicks > currentScore) {
+            await env.GAME_KV.put(scoreKey, totalClicks.toString(), { expirationTtl: 3600 });
+            
+            // 裁决胜负
+            if (totalClicks >= 30) {
+                meta.status = 'finished';
+                meta.winner = player;
+                await env.GAME_KV.put(metaKey, JSON.stringify(meta), { expirationTtl: 3600 });
+            }
         }
-
-        await env.GAME_KV.put(kvKey, JSON.stringify(room), { expirationTtl: 3600 });
-        return new Response(JSON.stringify(room), { headers });
+        return new Response(JSON.stringify({ success: true }), { headers });
     }
 
     return new Response(JSON.stringify({ error: "未知的操作" }), { status: 400, headers });
