@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🐍 双人联机贪吃蛇大决战（Supabase 强同步版）</title>
+    <title>🐍 双人联机贪吃蛇大决战（完美同步版）</title>
     <style>
         :root { --bg-color: #0f172a; --card-bg: #1e293b; --text-main: #f8fafc; --text-muted: #94a3b8; --primary: #3b82f6; --p1-color: #ec4899; --p2-color: #10b981; }
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -12,25 +12,20 @@
         .view { display: none; }
         .view.active { display: block; }
         .card { background: var(--card-bg); border: 1px solid #334155; border-radius: 16px; padding: 24px; margin-bottom: 20px; }
-        button { padding: 12px 24px; color: white; background: linear-gradient(135deg, #3b82f6, #2563eb); border: none; border-radius: 12px; cursor: pointer; }
+        button { padding: 12px 24px; color: white; background: linear-gradient(135deg, #3b82f6, #2563eb); border: none; border-radius: 12px; cursor: pointer; font-weight: bold; }
+        button:disabled { background: #334155; cursor: not-allowed; opacity: 0.6; }
         .btn-secondary { background: #334155; margin-bottom: 20px; }
         .room-item { display: flex; justify-content: space-between; align-items: center; padding: 14px; background: #111827; border-radius: 10px; margin-top: 10px; }
         .badge { padding: 4px 8px; font-size: 0.75rem; font-weight: bold; border-radius: 6px; }
         .score-board { display: flex; justify-content: space-between; margin: 15px 0; font-size: 1.1rem; font-weight: bold; }
         
-        #canvas-container { display: flex; justify-content: center; margin: 20px 0; position: relative; }
+        #canvas-container { display: flex; flex-direction: column; align-items: center; margin: 20px 0; }
         canvas { background: #020617; border: 4px solid #334155; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5); }
-        
-        #countdown-overlay { 
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
-            display: flex; justify-content: center; align-items: center; 
-            font-size: 5rem; font-weight: bold; color: #f59e0b; 
-            text-shadow: 0 0 20px rgba(245, 158, 11, 0.6);
-            pointer-events: none; background: rgba(2, 6, 23, 0.6); border-radius: 12px;
-            display: none; 
-        }
-
         #game-status { text-align: center; font-size: 1.2rem; font-weight: bold; margin: 10px 0; color: #f59e0b; }
+        
+        /* P2 专属开始对局大按钮 */
+        .start-match-btn { width: 100%; padding: 18px; font-size: 1.3rem; background: linear-gradient(135deg, #10b981, #059669); margin-top: 15px; display: none; }
+
         .controls { display: grid; grid-template-columns: repeat(3, 100px); grid-template-rows: repeat(2, 60px); gap: 10px; justify-content: center; margin-top: 20px; }
         .controls button { padding: 0; font-size: 1.5rem; background: #334155; }
         .controls .up { grid-column: 2; }
@@ -45,8 +40,8 @@
         <div id="view-lobby" class="view">
             <button class="btn-secondary" onclick="window.location.href='/'">← 返回主页</button>
             <div class="card">
-                <h2>🐍 双人实时对战贪吃蛇</h2>
-                <p>全面切断云端KV延迟干扰！当挑战者入场，全员由 Supabase 通道强制同步 5 秒倒计时开赛！</p>
+                <h2>🐍 双人联机贪吃蛇（倒计时同步版）</h2>
+                <p>完美解决 KV 延迟！挑战者（P2）进入房间后拥有绝对开局控制权，点击后双方同步 5 秒倒计时开战！</p>
             </div>
             <div class="card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
@@ -68,11 +63,11 @@
                     <span style="color: var(--p2-color)">挑战者 P2 长度: <span id="p2-score">3</span></span>
                 </div>
 
-                <div id="game-status">正在连接通道...</div>
+                <div id="game-status">正在建立连接...</div>
 
                 <div id="canvas-container">
                     <canvas id="gameCanvas" width="400" height="400"></canvas>
-                    <div id="countdown-overlay">5</div>
+                    <button id="p2-start-btn" class="start-match-btn" onclick="p2TriggerStart()">🔥 准备就绪，点击开始游戏</button>
                 </div>
 
                 <div class="controls">
@@ -86,31 +81,34 @@
     </div>
 
     <script>
+        // ⚡ 填入你的 Supabase 真实凭证
         const SUPABASE_URL = 'https://mamubvgmcetepllznifl.supabase.co'; 
         const SUPABASE_ANON_KEY = 'sb_publishable_HEeNPSqD75cWlnmZjcVHKA_Pw-OdL_A';
-    
+
         const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    
+
         const gameId = 'snake';
         let myRole = null;
         let gameChannel = null;
         let gameTicker = null; 
         let gameOver = false;
-        let isCountingDown = false; 
-    
+        let countdownNum = 5; // 倒计时秒数
+        let isCountingDown = false;
+
         const urlParams = new URLSearchParams(window.location.search);
         const roomId = urlParams.get('roomId');
-    
+
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         const grid = 20; 
-    
+
+        // 贪吃蛇初始状态数据
         let food = { x: 200, y: 200 };
         let snake1 = [{ x: 60, y: 100 }, { x: 40, y: 100 }, { x: 20, y: 100 }]; 
         let snake2 = [{ x: 320, y: 280 }, { x: 340, y: 280 }, { x: 360, y: 280 }]; 
         let d1 = 'RIGHT'; 
         let d2 = 'LEFT';  
-    
+
         async function init() {
             if (!roomId) {
                 document.getElementById('view-lobby').classList.add('active');
@@ -121,21 +119,23 @@
                 myRole = localStorage.getItem(`room_${roomId}_role`);
                 
                 await syncBaseRoomStatus();
-    
+
                 if (SUPABASE_URL === 'YOUR_SUPABASE_URL') {
                     document.getElementById('game-status').innerText = '❌ 未配置 Supabase 密钥';
+                    alert('请先配置 Supabase 密钥！');
                     return;
                 }
-    
+
                 connectSupabaseRealtime();
                 setupKeyboardControls();
                 draw(); 
             }
         }
-    
+
+        // 获取房间大厅列表
         async function fetchRooms() {
             const ul = document.getElementById('room-list');
-            ul.innerHTML = '<p style="text-align:center;">正在探测活跃房间...</p>';
+            ul.innerHTML = '<p style="text-align:center;">正在探测空闲时空...</p>';
             const res = await fetch(`/api/room?action=list&gameId=${gameId}&_t=${Date.now()}`);
             const rooms = await res.json();
             ul.innerHTML = rooms.length === 0 ? '<p style="text-align:center; color:#64748b;">暂无房间，快去创建一个吧！</p>' : '';
@@ -149,284 +149,255 @@
                 ul.appendChild(li);
             });
         }
-    
+
+        // 创建房间
         async function createRoom() {
             const res = await fetch('/api/room?action=create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameId }) });
             const data = await res.json();
             localStorage.setItem(`room_${data.roomId}_role`, 'p1');
             window.location.href = `?roomId=${data.roomId}`;
         }
-    
+
+        // 底层 Cloudflare 房间状态同步
         async function syncBaseRoomStatus() {
             const res = await fetch(`/api/room?action=status&roomId=${roomId}&gameId=${gameId}&_t=${Date.now()}`);
             if (res.status === 404) { alert('房间不存在'); window.location.href = '/snake.html'; return; }
             const room = await res.json();
-    
+
             if (!myRole) {
                 if (!room.p1) myRole = 'p1';
                 else if (!room.p2) myRole = 'p2';
                 else myRole = 'audience';
                 localStorage.setItem(`room_${roomId}_role`, myRole);
             }
-    
+
             document.getElementById('player-identity').innerText = { 'p1': '⚡ 房主 (P1) · 粉蛇', 'p2': '🎯 挑战者 (P2) · 绿蛇', 'audience': '👁️ 观众' }[myRole];
             
+            // P2 进屋，修改 KV 基础状态
             if (room.status === 'waiting' && myRole === 'p2' && room.p2 !== 'joined') {
                 await fetch('/api/room?action=join', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomId, gameId }) });
+                // 瞬间向 P1 发送一个“我进屋了”的实时长连接广播
+                setTimeout(() => { if (gameChannel) gameChannel.send({ type: 'broadcast', event: 'p2-joined-channel', payload: {} }); }, 800);
             }
         }
-    
+
+        // ⚡ Supabase 长连接及事件注册
         function connectSupabaseRealtime() {
             gameChannel = supabaseClient.channel(`snake-room-${roomId}`);
-    
+
             gameChannel
                 .on('broadcast', { event: 'direction-update' }, (payload) => {
                     const data = payload.payload;
                     if (data.player === 'p1') d1 = data.dir;
                     if (data.player === 'p2') d2 = data.dir;
                 })
-                .on('broadcast', { event: 'p2-ready' }, () => {
-                    // 📡 房主 P1 专属监听到：P2 已经进屋并举手了
-                    if (myRole === 'p1') {
-                        // 1. P1 率先在本地开启倒计时
-                        runFiveSecondCountdown();
-                        // 2. P1 随机生成食物
-                        generateFoodCoords();
-                        // 3. P1 广播开赛指令给 P2，顺便带上食物坐标
-                        gameChannel.send({
-                            type: 'broadcast',
-                            event: 'start-countdown',
-                            payload: { initialFood: food }
-                        });
-                    }
-                })
-                .on('broadcast', { event: 'start-countdown' }, (payload) => {
-                    // 📡 挑战者 P2 监听到：房主发来了开赛指令
-                    if (myRole === 'p2' || myRole === 'audience') {
-                        // 同步房主发过来的初始化食物
-                        if (payload.payload && payload.payload.initialFood) {
-                            food = payload.payload.initialFood;
-                        }
-                        runFiveSecondCountdown();
-                    }
-                })
                 .on('broadcast', { event: 'food-update' }, (payload) => {
                     food = payload.payload.food;
+                    draw(); // 收到食物立刻重绘
+                })
+                .on('broadcast', { event: 'p2-joined-channel' }, () => {
+                    // P1 发现 P2 连接到了长连接，修改状态显示
+                    if(myRole === 'p1') {
+                        document.getElementById('game-status').innerText = '🤝 挑战者已就绪，等待对方发起对局...';
+                    }
+                })
+                .on('broadcast', { event: 'trigger-countdown' }, () => {
+                    // ✨ 核心同步亮点：两边同时接收到通知，开启倒计时逻辑！
+                    startSyncCountdown();
                 })
                 .subscribe((status) => {
                     if (status === 'SUBSCRIBED') {
-                        // 检查一下如果是单人重连或掉线
-                        checkRoomStateOnSubscribe();
-    
-                        // 🤝 握手开始：如果是 P2 进屋，隔 800 毫秒（确保通道完全咬合）向房主发送就位广播
-                        if (myRole === 'p2') {
-                            setTimeout(() => {
-                                gameChannel.send({ type: 'broadcast', event: 'p2-ready', payload: {} });
-                            }, 800);
-                        }
+                        checkRoomStateAndSetupUI();
                     }
                 });
         }
-    
-        async function checkRoomStateOnSubscribe() {
+
+        // 连接建立后判定 UI 显示
+        async function checkRoomStateAndSetupUI() {
             const res = await fetch(`/api/room?action=status&roomId=${roomId}&gameId=${gameId}&_t=${Date.now()}`);
             const room = await res.json();
             const statusText = document.getElementById('game-status');
-    
+            const p2Btn = document.getElementById('p2-start-btn');
+
             if (room.status === 'waiting') {
-                statusText.innerText = '⏳ 连通成功！等待挑战者进屋...';
-            } else if (room.status === 'playing' && !isCountingDown && !gameTicker) {
-                // 防御：如果是中途断线重连，直接开跑
-                statusText.innerText = '🟢 激战中！冲啊！';
-                gameTicker = setInterval(gameLoop, 150); 
-            } else if (room.status === 'finished') {
-                statusText.innerText = '🏁 比赛已结束';
+                if (myRole === 'p1') {
+                    statusText.innerText = '⏳ 等待挑战者加入房间...';
+                } else if (myRole === 'p2') {
+                    statusText.innerText = '👋 你已成功加入！请点击下方按钮开启大战！';
+                    p2Btn.style.display = 'block'; // ✨ 只有 P2 能够看到并点击这个按钮
+                }
+            } else if (room.status === 'playing') {
+                statusText.innerText = '🏁 房间比赛已在进行中或已过期';
             }
         }
-    
-        function runFiveSecondCountdown() {
-            if (isCountingDown) return; 
+
+        // ✨ P2 玩家点击开始游戏按钮触发
+        function p2TriggerStart() {
+            document.getElementById('p2-start-btn').disabled = true;
+            document.getElementById('p2-start-btn').style.display = 'none';
+
+            // 告诉 Cloudflare 后端把 KV 里的房间状态改为 playing，避免其他人再加进来
+            fetch('/api/room?action=join', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomId, gameId }) });
+
+            // ⚡ 瞬间通过管道对所有人（包括P1和自己）广播：“开始5秒倒计时！”
+            gameChannel.send({
+                type: 'broadcast',
+                event: 'trigger-countdown',
+                payload: {}
+            });
+        }
+
+        // 🕒 双方在本地完美同频运行的 5 秒倒计时
+        function startSyncCountdown() {
             isCountingDown = true;
+            countdownNum = 5;
+            document.getElementById('p2-start-btn').style.display = 'none'; // 确保 P1 那边也不会产生按钮残留
             
-            let count = 5;
-            const overlay = document.getElementById('countdown-overlay');
-            const statusText = document.getElementById('game-status');
-            
-            overlay.style.display = 'flex';
-            overlay.innerText = count;
-            statusText.innerText = `🚦 双方连通完毕！对决将在 ${count} 秒后开启！`;
-    
-            let timer = setInterval(() => {
-                count--;
-                if (count > 0) {
-                    overlay.innerText = count;
-                    statusText.innerText = `🚦 双方连通完毕！对决将在 ${count} 秒后开启！`;
-                } else if (count === 0) {
-                    overlay.innerText = 'GO!';
-                    statusText.innerText = '🚀 比赛爆发！狂飚方向！';
-                    gameTicker = setInterval(gameLoop, 150);
+            let countdownTimer = setInterval(() => {
+                if (countdownNum > 0) {
+                    document.getElementById('game-status').innerText = `⚡ 预备！双方倒计时：${countdownNum} 秒...`;
+                    draw(); // 刷新画布，让画笔把数字画到正中央
+                    countdownNum--;
                 } else {
-                    clearInterval(timer);
-                    overlay.style.display = 'none'; 
+                    // 倒计时彻底归 0，游戏正式爆发爆发！
+                    clearInterval(countdownTimer);
                     isCountingDown = false;
+                    document.getElementById('game-status').innerText = '🟢 激战中！冲啊！';
+                    
+                    // 启动贪吃蛇移动主循环
+                    gameTicker = setInterval(gameLoop, 150); 
+                    
+                    // 依旧由 P1 主机在第 0 毫秒生成第一个全场共享的美味食物
+                    if (myRole === 'p1') { generateAndBroadcastFood(); }
                 }
             }, 1000);
         }
-    
+
+        // 处理本地控制方向
         function setupKeyboardControls() {
             document.addEventListener('keydown', (e) => {
                 if (gameOver || isCountingDown || (myRole !== 'p1' && myRole !== 'p2')) return;
-                
                 let requestedDir = null;
                 if (e.key === 'w' || e.key === 'ArrowUp') requestedDir = 'UP';
                 if (e.key === 's' || e.key === 'ArrowDown') requestedDir = 'DOWN';
                 if (e.key === 'a' || e.key === 'ArrowLeft') requestedDir = 'LEFT';
                 if (e.key === 'd' || e.key === 'ArrowRight') requestedDir = 'RIGHT';
-    
                 if (requestedDir) changeDirection(requestedDir);
             });
         }
-    
+
         function changeDirection(newDir) {
-            if (isCountingDown) return; 
             let currentDir = myRole === 'p1' ? d1 : d2;
-            
             if (newDir === 'UP' && currentDir === 'DOWN') return;
             if (newDir === 'DOWN' && currentDir === 'UP') return;
             if (newDir === 'LEFT' && currentDir === 'RIGHT') return;
             if (newDir === 'RIGHT' && currentDir === 'LEFT') return;
-    
+
             if (myRole === 'p1') d1 = newDir;
             if (myRole === 'p2') d2 = newDir;
-    
-            gameChannel.send({
-                type: 'broadcast',
-                event: 'direction-update',
-                payload: { player: myRole, dir: newDir }
-            });
+
+            gameChannel.send({ type: 'broadcast', event: 'direction-update', payload: { player: myRole, dir: newDir } });
         }
-    
-        // 纯计算食物坐标
-        function generateFoodCoords() {
+
+        function generateAndBroadcastFood() {
             food = {
                 x: Math.floor(Math.random() * (canvas.width / grid)) * grid,
                 y: Math.floor(Math.random() * (canvas.height / grid)) * grid
             };
-        }
-    
-        // 局中吃了之后实时广播
-        function generateAndBroadcastFood() {
-            generateFoodCoords();
             gameChannel.send({ type: 'broadcast', event: 'food-update', payload: { food } });
         }
-    
+
+        // 核心运行循环
         function gameLoop() {
-            if (gameOver) return;
-    
-            let p1Head = { x: snake1[0].x, y: snake1[0].y };
-            if (d1 === 'RIGHT') p1Head.x += grid;
-            if (d1 === 'LEFT')  p1Head.x -= grid;
-            if (d1 === 'UP')    p1Head.y -= grid;
-            if (d1 === 'DOWN')  p1Head.y += grid;
-    
-            let p2Head = { x: snake2[0].x, y: snake2[0].y };
-            if (d2 === 'RIGHT') p2Head.x += grid;
-            if (d2 === 'LEFT')  p2Head.x -= grid;
-            if (d2 === 'UP')    p2Head.y -= grid;
-            if (d2 === 'DOWN')  p2Head.y += grid;
-    
-            let p1Eats = (p1Head.x === food.x && p1Head.y === food.y);
-            let p2Eats = (p2Head.x === food.x && p2Head.y === food.y);
-    
-            snake1.unshift(p1Head);
+            if (gameOver || isCountingDown) return;
+
+            let h1 = { x: snake1[0].x, y: snake1[0].y };
+            if (d1 === 'RIGHT') h1.x += grid; if (d1 === 'LEFT') h1.x -= grid; if (d1 === 'UP') h1.y -= grid; if (d1 === 'DOWN') h1.y += grid;
+
+            let h2 = { x: snake2[0].x, y: snake2[0].y };
+            if (d2 === 'RIGHT') h2.x += grid; if (d2 === 'LEFT') h2.x -= grid; if (d2 === 'UP') h2.y -= grid; if (d2 === 'DOWN') h2.y += grid;
+
+            let p1Eats = (h1.x === food.x && h1.y === food.y);
+            let p2Eats = (h2.x === food.x && h2.y === food.y);
+
+            snake1.unshift(h1);
             if (p1Eats) {
                 document.getElementById('p1-score').innerText = snake1.length;
-                if (myRole === 'p1') generateAndBroadcastFood(); 
-            } else {
-                snake1.pop();
-            }
-    
-            snake2.unshift(p2Head);
-            if (p2Eats) {
-                document.getElementById('p2-score').innerText = snake2.length;
-            } else {
-                snake2.pop();
-            }
-    
+                if (myRole === 'p1') generateAndBroadcastFood();
+            } else { snake1.pop(); }
+
+            snake2.unshift(h2);
+            if (p2Eats) { document.getElementById('p2-score').innerText = snake2.length; } else { snake2.pop(); }
+
             checkCollisions();
             draw();
         }
-    
+
         function checkCollisions() {
-            const h1 = snake1[0];
-            const h2 = snake2[0];
-            let p1Dead = false;
-            let p2Dead = false;
-    
+            const h1 = snake1[0]; const h2 = snake2[0];
+            let p1Dead = false; let p2Dead = false;
+
             if (h1.x < 0 || h1.x >= canvas.width || h1.y < 0 || h1.y >= canvas.height) p1Dead = true;
             if (h2.x < 0 || h2.x >= canvas.width || h2.y < 0 || h2.y >= canvas.height) p2Dead = true;
-    
-            snake1.forEach((part, index) => { if (index > 0 && h1.x === part.x && h1.y === part.y) p1Dead = true; });
+
+            snake1.forEach((part, idx) => { if (idx > 0 && h1.x === part.x && h1.y === part.y) p1Dead = true; });
             snake2.forEach(part => { if (h1.x === part.x && h1.y === part.y) p1Dead = true; });
-    
-            snake2.forEach((part, index) => { if (index > 0 && h2.x === part.x && h2.y === part.y) p2Dead = true; });
+            snake2.forEach((part, idx) => { if (idx > 0 && h2.x === part.x && h2.y === part.y) p2Dead = true; });
             snake1.forEach(part => { if (h2.x === part.x && h2.y === part.y) p2Dead = true; });
-    
+
             if (p1Dead || p2Dead) {
                 gameOver = true;
                 clearInterval(gameTicker);
                 const statusText = document.getElementById('game-status');
-    
-                if (p1Dead && p2Dead) {
-                    statusText.innerText = '💥 惨烈！双方同时玉石俱焚（平局）！';
-                } else if (p1Dead) {
-                    statusText.innerText = '🎉 挑战者 (P2) 获得胜利！';
-                    archiveWinner('p2');
-                } else if (p2Dead) {
-                    statusText.innerText = '🎉 房主 (P1) 获得胜利！';
-                    archiveWinner('p1');
-                }
+                if (p1Dead && p2Dead) { statusText.innerText = '💥 惨烈！双方同归于尽（平局）！'; }
+                else if (p1Dead) { statusText.innerText = '🎉 挑战者 (P2) 获得胜利！'; archiveWinner('p2'); }
+                else if (p2Dead) { statusText.innerText = '🎉 房主 (P1) 获得胜利！'; archiveWinner('p1'); }
             }
         }
-    
+
         function archiveWinner(winner) {
             if (myRole === winner) {
-                fetch('/api/room?action=click', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ roomId, gameId, player: myRole, totalClicks: 30 }) 
-                });
+                fetch('/api/room?action=click', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomId, gameId, player: myRole, totalClicks: 30 }) });
             }
         }
-    
+
+        // 画布渲染
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
+
+            // 绘制精美街机网格线
             ctx.strokeStyle = '#1e293b';
             for (let i = 0; i < canvas.width; i += grid) {
                 ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); ctx.stroke();
                 ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(canvas.width, i); ctx.stroke();
             }
-    
+
+            // 如果处于局前的 5 秒倒计时，在画布正中央渲染巨大的数字
+            if (isCountingDown) {
+                ctx.fillStyle = 'rgba(245, 158, 11, 0.8)';
+                ctx.font = 'bold 80px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(countdownNum === 0 ? "GO!" : countdownNum, canvas.width / 2, canvas.height / 2);
+            }
+
+            // 渲染苹果食物
             ctx.fillStyle = '#ef4444';
-            ctx.shadowBlur = 10; ctx.shadowColor = '#ef4444';
             ctx.fillRect(food.x, food.y, grid - 2, grid - 2);
-            ctx.shadowBlur = 0; 
-    
-            ctx.fillStyle = '#ec4899';
+
+            // 渲染 P1（粉色）
             snake1.forEach((part, index) => {
-                if (index === 0) ctx.fillStyle = '#f472b6'; 
-                else ctx.fillStyle = '#ec4899';
+                ctx.fillStyle = index === 0 ? '#f472b6' : '#ec4899';
                 ctx.fillRect(part.x, part.y, grid - 2, grid - 2);
             });
-    
+
+            // 渲染 P2（绿色）
             snake2.forEach((part, index) => {
-                if (index === 0) ctx.fillStyle = '#34d399'; 
-                else ctx.fillStyle = '#10b981';
+                ctx.fillStyle = index === 0 ? '#34d399' : '#10b981';
                 ctx.fillRect(part.x, part.y, grid - 2, grid - 2);
             });
         }
-    
+
         init();
     </script>
 </body>
