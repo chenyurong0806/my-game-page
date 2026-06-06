@@ -213,21 +213,35 @@
         }
 
         // 连接建立后判定 UI 显示
+        // 🛠️ 修复后的连接建立后判定 UI 显示函数
         async function checkRoomStateAndSetupUI() {
             const res = await fetch(`/api/room?action=status&roomId=${roomId}&gameId=${gameId}&_t=${Date.now()}`);
             const room = await res.json();
             const statusText = document.getElementById('game-status');
             const p2Btn = document.getElementById('p2-start-btn');
 
-            if (room.status === 'waiting') {
+            // 1. 如果游戏在 Cloudflare KV 数据库里是 finished，说明真的打完了
+            if (room.status === 'finished') {
+                statusText.innerText = '🏁 比赛已结束';
+                return;
+            }
+
+            // 2. 如果游戏还没打完（不管后端是 waiting 还是刚被 P2 加入改成了 playing）
+            // 只要本地的 gameOver 还是 false，且还没有开始倒计时，就说明处于“局前准备阶段”
+            if (!gameOver && !isCountingDown) {
                 if (myRole === 'p1') {
-                    statusText.innerText = '⏳ 等待挑战者加入房间...';
+                    // 房主视角：提示等待 P2 点开始
+                    statusText.innerText = '🤝 挑战者已就绪，等待对方发起对局...';
+                    p2Btn.style.display = 'none';
                 } else if (myRole === 'p2') {
+                    // 挑战者视角：亮起大按钮，允许点火开局！
                     statusText.innerText = '👋 你已成功加入！请点击下方按钮开启大战！';
-                    p2Btn.style.display = 'block'; // ✨ 只有 P2 能够看到并点击这个按钮
+                    p2Btn.style.display = 'block'; 
+                    p2Btn.disabled = false;
+                } else {
+                    // 观众视角
+                    statusText.innerText = '👁️ 正在等待挑战者点击开始游戏...';
                 }
-            } else if (room.status === 'playing') {
-                statusText.innerText = '🏁 房间比赛已在进行中或已过期';
             }
         }
 
