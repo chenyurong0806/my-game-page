@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的联机小游戏合集</title>
+    <style>
+        body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }
+        .view { display: none; }
+        .active { display: block; }
+        .card { border: 1px solid #ccc; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; background: #0070f3; color: white; border: none; border-radius: 5px; }
+        button:hover { background: #0051a8; }
+        .score-board { display: flex; justify-content: space-around; font-size: 24px; margin: 20px 0; }
+    </style>
+</head>
+<body>
+
+    <div id="view-home" class="view">
+        <h2>🎮 联机小游戏合集</h2>
+        <div class="card">
+            <h3>点击速度大赛 (click-race)</h3>
+            <p>比比看谁先点击满 30 次！狂戳按钮获得胜利。</p>
+            <button onclick="navigateTo('/click-race')">进入游戏大厅</button>
+        </div>
+    </div>
+
+    <div id="view-lobby" class="view">
+        <button onclick="navigateTo('/')">← 返回首页</button>
+        <h2 id="lobby-title">游戏大厅</h2>
+        <div class="card">
+            <h3>📜 游戏规则</h3>
+            <p id="lobby-rules">加载中...</p>
+        </div>
+        <div class="card">
+            <h3>🏠 房间列表</h3>
+            <button onclick="createRoom()">➕ 创建新房间</button>
+            <ul id="room-list" style="margin-top: 15px;">正在加载房间列表...</ul>
+        </div>
+    </div>
+
+    <div id="view-game" class="view">
+        <button onclick="leaveRoom()">← 退出房间</button>
+        <h2 id="game-title">游戏房间</h2>
+        <p id="player-identity" style="color: #666;"></p>
+        
+        <div class="card">
+            <div class="score-board">
+                <div>玩家 1 (房主): <span id="p1-score">0</span> /30</div>
+                <div>玩家 2 (挑战者): <span id="p2-score">0</span> /30</div>
+            </div>
+            <p id="game-status" style="text-align:center; font-weight:bold; font-size:18px;"></p>
+            <div style="text-align: center; margin-top: 20px;">
+                <button id="click-btn" onclick="sendClick()" disabled>🔥 猛烈点击！</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 游戏配置
+        const GAME_CONFIGS = {
+            'click-race': { name: '点击速度大赛', rules: '两名玩家加入房间。游戏开始后，最先点击按钮满 30 次的玩家获胜！' }
+        };
+
+        let currentPath = '';
+        let pollingInterval = null;
+        let myRole = null; // 'p1' 或 'p2'
+
+        // 前端路由解析
+        function route() {
+            clearInterval(pollingInterval);
+            currentPath = window.location.pathname;
+            const parts = currentPath.split('/').filter(Boolean);
+
+            document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+
+            if (parts.length === 0) {
+                // 路径为 /
+                document.getElementById('view-home').classList.add('active');
+            } else if (parts.length === 1) {
+                // 路径为 /游戏名
+                const gameId = parts[0];
+                if (!GAME_CONFIGS[gameId]) return alert('游戏不存在');
+                
+                document.getElementById('view-lobby').classList.add('active');
+                document.getElementById('lobby-title').innerText = GAME_CONFIGS[gameId].name;
+                document.getElementById('lobby-rules').innerText = GAME_CONFIGS[gameId].rules;
+                fetchRooms(gameId);
+            } else if (parts.length === 2) {
+                // 路径为 /游戏名/房间号
+                document.getElementById('view-game').classList.add('active');
+                initGameRoom(parts[0], parts[1]);
+            }
+        }
+
+        function navigateTo(path) {
+            window.history.pushState({}, '', path);
+            route();
+        }
+        window.onpopstate = route;
+        window.onload = route;
+
+        // 大厅逻辑：获取房间列表
+        async function fetchRooms(gameId) {
+            const res = await fetch(`/api/room?action=list&gameId=${gameId}`);
+            const rooms = await res.json();
+            const ul = document.getElementById('room-list');
+            ul.innerHTML = rooms.length === 0 ? '当前暂无房间，快去创建一个吧！' : '';
+            rooms.forEach(r => {
+                const li = document.createElement('li');
+                li.style.margin = '10px 0';
+                li.innerHTML = `房间 #${r.id} (${r.status === 'waiting' ? '等待中' : '游戏中'}) 
+                    <button style="padding:4px 10px; font-size:12px;" onclick="navigateTo('${currentPath}/${r.id}')" ${r.status !== 'waiting'?'disabled':''}>加入</button>`;
+                ul.appendChild(li);
+            });
+        }
+
+        // 大厅逻辑：创建房间
+        async function createRoom() {
+            const gameId = window.location.pathname.split('/').filter(Boolean)[0];
+            const res = await fetch('/api/room?action=create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ gameId })
+            });
+            const data = await res.json();
+            navigateTo(`/${gameId}/${data.roomId}`);
+        }
+
+        // 房间逻辑：初始化并开启轮询同步
+        function initGameRoom(gameId, roomId) {
+            document.getElementById('game-title').innerText = `${GAME_CONFIGS[gameId].name} - 房间 #${roomId}`;
+            myRole = localStorage.getItem(`room_${roomId}_role`) || null;
+            
+            // 每 1 秒向服务器查询一次房间最新状态（简单轮询实现联机）
+            pollRoomStatus(gameId, roomId);
+            pollingInterval = setInterval(() => pollRoomStatus(gameId, roomId), 1000);
+        }
+
+        async function pollRoomStatus(gameId, roomId) {
+            const res = await fetch(`/api/room?action=status&roomId=${roomId}`);
+            if (res.status === 404) {
+                alert('房间已被销毁');
+                navigateTo(`/${gameId}`);
+                return;
+            }
+            const room = await res.json();
+
+            // 如果本地没有身份，根据当前房间人数分配身份
+            if (!myRole) {
+                if (!room.p1) { myRole = 'p1'; } 
+                else if (!room.p2) { myRole = 'p2'; } 
+                else { myRole = 'audience'; } // 观众
+                localStorage.setItem(`room_${roomId}_role`, myRole);
+            }
+
+            document.getElementById('player-identity').innerText = `您的身份：${myRole === 'p1' ? '房主 (P1)' : myRole === 'p2' ? '挑战者 (P2)' : '观众'}`;
+            document.getElementById('p1-score').innerText = room.p1Score || 0;
+            document.getElementById('p2-score').innerText = room.p2Score || 0;
+
+            const btn = document.getElementById('click-btn');
+            const statusText = document.getElementById('game-status');
+
+            if (room.status === 'waiting') {
+                statusText.innerText = '⏳ 等待挑战者加入...';
+                btn.disabled = true;
+                // 如果你是P2，且进来了，自动通知后端加入
+                if (myRole === 'p2' && room.p2 !== 'joined') {
+                    await fetch('/api/room?action=join', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ roomId })
+                    });
+                }
+            } else if (room.status === 'playing') {
+                statusText.innerText = '🚀 比赛进行中，快戳！';
+                btn.disabled = myRole === 'audience';
+            } else if (room.status === 'finished') {
+                statusText.innerText = `🎉 游戏结束！胜利者是：${room.winner === 'p1' ? '房主 (P1)' : '挑战者 (P2)'}`;
+                btn.disabled = true;
+                clearInterval(pollingInterval);
+            }
+        }
+
+        // 房间逻辑：发送点击动作
+        async function sendClick() {
+            if (myRole !== 'p1' && myRole !== 'p2') return;
+            const parts = window.location.pathname.split('/').filter(Boolean);
+            await fetch('/api/room?action=click', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ roomId: parts[1], player: myRole })
+            });
+            // 立即刷新数据，提升连击流畅感
+            pollRoomStatus(parts[0], parts[1]);
+        }
+
+        function leaveRoom() {
+            const parts = window.location.pathname.split('/').filter(Boolean);
+            navigateTo(`/${parts[0]}`);
+        }
+    </script>
+</body>
+</html>
