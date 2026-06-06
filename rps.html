@@ -66,7 +66,7 @@
         const SUPABASE_ANON_KEY = 'sb_publishable_HEeNPSqD75cWlnmZjcVHKA_Pw-OdL_A';
 
         // 初始化 Supabase 客户端
-        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         const gameId = 'rps';
         let myRole = null;
@@ -154,7 +154,7 @@
         // ⚡ 建立 Supabase 实时专属信道
         function connectSupabaseRealtime() {
             // 给当前房间创建一条专属的通信管道 (用房间ID命名)
-            gameChannel = supabase.channel(`game-room-${roomId}`);
+            gameChannel = supabaseClient.channel(`game-room-${roomId}`);
 
             // 监听这条管道内所有人广播的 "player-move" 事件
             gameChannel
