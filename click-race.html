@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🏎️ 点击速度大赛</title>
+    <title>🏎️ 点击速度大赛（Supabase 毫秒同步版）</title>
     <style>
         :root { --bg-color: #0f172a; --card-bg: #1e293b; --text-main: #f8fafc; --text-muted: #94a3b8; --primary: #3b82f6; --accent-p1: #ec4899; --accent-p2: #10b981; }
         * { box-sizing: border-box; margin: 0; padding: 0; transition: all 0.2s ease; }
@@ -26,6 +26,7 @@
         #game-status { text-align: center; font-size: 1.2rem; font-weight: bold; margin: 15px 0; color: #f59e0b; }
         .huge-click-btn { width: 100%; padding: 25px; font-size: 1.5rem; background: linear-gradient(135deg, #ef4444, #3b82f6); }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
     <div class="container">
@@ -33,7 +34,7 @@
             <button class="btn-secondary" onclick="window.location.href='/'">← 返回主页</button>
             <div class="card">
                 <h2>🏎️ 点击速度大赛</h2>
-                <p>游戏开始后，双方玩家狂戳按钮。率先冲满 30 次的用户直接获胜！</p>
+                <p>游戏开始后，双方玩家狂戳按钮。实时管道毫秒级同步能量条，率先戳满 30 次获胜！</p>
             </div>
             <div class="card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
@@ -60,38 +61,56 @@
                         <div class="progress-track"><div id="p2-bar" class="progress-bar"></div></div>
                     </div>
                 </div>
-                <div id="game-status"></div>
+                <div id="game-status">正在建立连接...</div>
                 <button id="click-btn" class="huge-click-btn" onclick="sendClick()" disabled>🔥 猛烈点击！</button>
             </div>
         </div>
     </div>
 
     <script>
-        const gameId = 'click-race';
-        let pollingInterval = null;
-        let myRole = null;
-        let localMyClicks = 0;
+        // ⚡ 填入你的 Supabase 真实密钥，注意变量名避开冲突
+        const SUPABASE_URL = 'YOUR_SUPABASE_URL'; 
+        const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
 
-        // 获取 URL 里的房间 ID (例如: click-race.html?roomId=123456)
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        const gameId = 'click-race';
+        let myRole = null;
+        let gameChannel = null; // 实时通信信道
+        let gameOver = false;
+
+        // 本地局内分数状态管理
+        let p1Clicks = 0;
+        let p2Clicks = 0;
+
         const urlParams = new URLSearchParams(window.location.search);
         const roomId = urlParams.get('roomId');
 
         async function init() {
             if (!roomId) {
-                // 没有房间 ID，显示大厅
                 document.getElementById('view-lobby').classList.add('active');
                 fetchRooms();
             } else {
-                // 有房间 ID，进入游戏房间
                 document.getElementById('view-game').classList.add('active');
                 document.getElementById('game-title').innerText = `房间 #${roomId}`;
                 myRole = localStorage.getItem(`room_${roomId}_role`);
                 
-                pollRoomStatus();
-                pollingInterval = setInterval(pollRoomStatus, 1000);
+                // 1. 利用现有的后端同步基础状态并处理 P2 加入房间
+                await syncBaseRoomStatus();
+
+                // 2. 如果检测到依然是初始的默认密钥，进行防御保护提示
+                if (SUPABASE_URL === 'YOUR_SUPABASE_URL') {
+                    document.getElementById('game-status').innerText = '❌ 未配置 Supabase 密钥';
+                    alert('请在代码中配置您的 SUPABASE_URL 和 SUPABASE_ANON_KEY！');
+                    return;
+                }
+
+                // 3. ✨ 核心提速：连通 Supabase 实时 WebSocket 通道
+                connectSupabaseRealtime();
             }
         }
 
+        // 依旧经过原后端服务拉取活跃房间列表
         async function fetchRooms() {
             const ul = document.getElementById('room-list');
             ul.innerHTML = '<p style="text-align:center;">正在探测时空房间...</p>';
@@ -109,6 +128,7 @@
             });
         }
 
+        // 依旧经过原后端服务创建房间
         async function createRoom() {
             const res = await fetch('/api/room?action=create', {
                 method: 'POST',
@@ -120,7 +140,8 @@
             window.location.href = `?roomId=${data.roomId}`;
         }
 
-        async function pollRoomStatus() {
+        // 用原接口确定玩家身份并在挑战者进入时修改状态
+        async function syncBaseRoomStatus() {
             const res = await fetch(`/api/room?action=status&roomId=${roomId}&gameId=${gameId}&_t=${Date.now()}`);
             if (res.status === 404) { alert('房间不存在'); window.location.href = '/click-race.html'; return; }
             const room = await res.json();
@@ -134,60 +155,116 @@
 
             document.getElementById('player-identity').innerText = { 'p1': '⚡ 房主 (P1)', 'p2': '🎯 挑战者 (P2)', 'audience': '👁️ 观众' }[myRole];
             
-            const s1 = room.p1Score || 0;
-            const s2 = room.p2Score || 0;
-
-            if (room.status === 'playing' && localMyClicks === 0) {
-                localMyClicks = myRole === 'p1' ? s1 : (myRole === 'p2' ? s2 : 0);
+            // 当挑战者(P2)点击进入房间，且后端记录还处于waiting时，触发加入操作修改状态为playing
+            if (room.status === 'waiting' && myRole === 'p2' && room.p2 !== 'joined') {
+                const joinRes = await fetch('/api/room?action=join', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ roomId, gameId })
+                });
+                const updatedRoom = await joinRes.json();
+                // 触发通知：让已经在屋里的 P1 发现 P2 进来了
+                setTimeout(() => {
+                    if (gameChannel) {
+                        gameChannel.send({ type: 'broadcast', event: 'p2-entered', payload: {} });
+                    }
+                }, 1000);
             }
+        }
 
-            const renderP1 = myRole === 'p1' ? Math.max(s1, localMyClicks) : s1;
-            const renderP2 = myRole === 'p2' ? Math.max(s2, localMyClicks) : s2;
+        // ⚡ 建立 Supabase WebSocket 专属长连接
+        function connectSupabaseRealtime() {
+            gameChannel = supabaseClient.channel(`click-room-${roomId}`);
 
-            document.getElementById('p1-score').innerText = `${renderP1} / 30`;
-            document.getElementById('p2-score').innerText = `${renderP2} / 30`;
-            document.getElementById('p1-bar').style.width = `${Math.min((renderP1 / 30) * 100, 100)}%`;
-            document.getElementById('p2-bar').style.width = `${Math.min((renderP2 / 30) * 100, 100)}%`;
+            gameChannel
+                .on('broadcast', { event: 'click-event' }, (payload) => {
+                    if (gameOver) return;
+                    const data = payload.payload;
 
+                    // 实时同步云端发过来的对手最新点击数
+                    if (data.player === 'p1') p1Clicks = data.clicks;
+                    if (data.player === 'p2') p2Clicks = data.clicks;
+
+                    renderUI();
+                })
+                .on('broadcast', { event: 'p2-entered' }, () => {
+                    // P1 接收到 P2 已经进屋的通知，立刻刷新页面启用按钮
+                    location.reload();
+                })
+                .subscribe((status) => {
+                    if (status === 'SUBSCRIBED') {
+                        // 通道连接成功，通过再次查询确定最新显示状态
+                        checkCurrentStatusAndEnable();
+                    }
+                });
+        }
+
+        async function checkCurrentStatusAndEnable() {
+            const res = await fetch(`/api/room?action=status&roomId=${roomId}&gameId=${gameId}&_t=${Date.now()}`);
+            const room = await res.json();
+            
             const btn = document.getElementById('click-btn');
             const statusText = document.getElementById('game-status');
 
             if (room.status === 'waiting') {
                 statusText.innerText = '⏳ 等待挑战者进入房间...';
                 btn.disabled = true;
-                if (myRole === 'p2' && room.p2 !== 'joined') {
-                    await fetch('/api/room?action=join', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ roomId, gameId })
-                    });
-                }
             } else if (room.status === 'playing') {
                 statusText.innerText = '🚀 比赛开始！开始狂飙手速！';
                 btn.disabled = myRole === 'audience';
             } else if (room.status === 'finished') {
+                p1Clicks = room.p1Score || 0;
+                p2Clicks = room.p2Score || 0;
+                gameOver = true;
                 statusText.innerText = `🎉 胜利者是：${room.winner === 'p1' ? '房主 (P1)' : '挑战者 (P2)'}`;
                 btn.disabled = true;
-                clearInterval(pollingInterval);
+                renderUI();
             }
         }
 
-        async function sendClick() {
-            if (myRole !== 'p1' && myRole !== 'p2') return;
-            localMyClicks++;
+        function renderUI() {
+            // 实时渲染分数数字
+            document.getElementById('p1-score').innerText = `${p1Clicks} / 30`;
+            document.getElementById('p2-score').innerText = `${p2Clicks} / 30`;
             
-            if(myRole === 'p1') {
-                document.getElementById('p1-score').innerText = `${localMyClicks} / 30`;
-                document.getElementById('p1-bar').style.width = `${(localMyClicks / 30) * 100}%`;
-            } else {
-                document.getElementById('p2-score').innerText = `${localMyClicks} / 30`;
-                document.getElementById('p2-bar').style.width = `${(localMyClicks / 30) * 100}%`;
-            }
+            // 实时渲染能量条进度
+            document.getElementById('p1-bar').style.width = `${Math.min((p1Clicks / 30) * 100, 100)}%`;
+            document.getElementById('p2-bar').style.width = `${Math.min((p2Clicks / 30) * 100, 100)}%`;
 
-            await fetch('/api/room?action=click', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ roomId, gameId, player: myRole, totalClicks: localMyClicks })
+            // 胜负判定逻辑
+            if ((p1Clicks >= 30 || p2Clicks >= 30) && !gameOver) {
+                gameOver = true;
+                document.getElementById('click-btn').disabled = true;
+                const winnerRole = p1Clicks >= 30 ? 'p1' : 'p2';
+                document.getElementById('game-status').innerText = `🎉 胜利者是：${winnerRole === 'p1' ? '房主 (P1)' : '挑战者 (P2)'}`;
+                
+                // 由获胜方负责向 Cloudflare KV 进行一次最终存档，把房间状态闭环写入“已结束”
+                if (myRole === winnerRole) {
+                    fetch('/api/room?action=click', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ roomId, gameId, player: myRole, totalClicks: 30 })
+                    });
+                }
+            }
+        }
+
+        // 玩家频繁狂点按钮触发
+        function sendClick() {
+            if (myRole !== 'p1' && myRole !== 'p2' || gameOver) return;
+
+            // 本地数据立刻累加
+            if (myRole === 'p1') p1Clicks++;
+            if (myRole === 'p2') p2Clicks++;
+
+            // 0延迟刷新自己的画面
+            renderUI();
+
+            // ⚡ 核心提速魔法：通过长连接将自己最新的点击绝对值“推”给对方
+            gameChannel.send({
+                type: 'broadcast',
+                event: 'click-event',
+                payload: { player: myRole, clicks: (myRole === 'p1' ? p1Clicks : p2Clicks) }
             });
         }
 
