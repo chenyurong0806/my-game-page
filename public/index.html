@@ -160,6 +160,7 @@
         let currentPath = '';
         let pollingInterval = null;
         let myRole = null;
+        let localMyClicks = 0; // 【核心改动】前端独占的绝对手速计数器
         
         function route() {
             clearInterval(pollingInterval);
@@ -196,7 +197,6 @@
             const ul = document.getElementById('room-list');
             ul.innerHTML = '<p style="text-align:center; padding: 20px;">正在探测时空房间...</p>';
             try {
-                // 【核心修复】大厅列表加入时间戳防缓存
                 const res = await fetch(`/api/room?action=list&gameId=${gameId}&_t=${Date.now()}`);
                 const rooms = await res.json();
                 ul.innerHTML = rooms.length === 0 ? '<p style="text-align:center; color:#64748b; padding: 20px;">当前暂无房间，快去创建一个吧！</p>' : '';
@@ -232,13 +232,13 @@
         function initGameRoom(gameId, roomId) {
             document.getElementById('game-title').innerText = `房间 #${roomId}`;
             myRole = localStorage.getItem(`room_${roomId}_role`) || null;
+            localMyClicks = 0; // 重置本地计数器
             
             pollRoomStatus(gameId, roomId);
             pollingInterval = setInterval(() => pollRoomStatus(gameId, roomId), 1000);
         }
         
         async function pollRoomStatus(gameId, roomId) {
-            // 【核心修复】房间状态轮询加入时间戳 _t=${Date.now()}，强迫浏览器和云端同步最新状态
             const res = await fetch(`/api/room?action=status&roomId=${roomId}&gameId=${gameId}&_t=${Date.now()}`);
             if (res.status === 404) {
                 alert('房间已被销毁或不存在');
@@ -254,16 +254,25 @@
                 localStorage.setItem(`room_${roomId}_role`, myRole);
             }
         
-            const roleNames = { 'p1': '⚡ 房主 (P1)', 'p2': '🎯 挑战者 (P2)', 'audience': '👁️ 赛事观察员 (观众)' };
-            document.getElementById('player-identity').innerText = roleNames[myRole];
+            document.getElementById('player-identity').innerText = 
+                { 'p1': '⚡ 房主 (P1)', 'p2': '🎯 挑战者 (P2)', 'audience': '👁️ 观众' }[myRole];
             
             const s1 = room.p1Score || 0;
             const s2 = room.p2Score || 0;
-            document.getElementById('p1-score').innerText = `${s1} / 30`;
-            document.getElementById('p2-score').innerText = `${s2} / 30`;
         
-            document.getElementById('p1-bar').style.width = `${Math.min((s1 / 30) * 100, 100)}%`;
-            document.getElementById('p2-bar').style.width = `${Math.min((s2 / 30) * 100, 100)}%`;
+            // 【断档恢复机制】如果刷新网页，从云端最新同步计数器
+            if (room.status === 'playing' && localMyClicks === 0) {
+                localMyClicks = myRole === 'p1' ? s1 : (myRole === 'p2' ? s2 : 0);
+            }
+        
+            // 【渲染保护】针对自己，始终取本地手速和云端返回的最大值，彻底解决“分数倒退”的视觉冲突
+            const renderP1 = myRole === 'p1' ? Math.max(s1, localMyClicks) : s1;
+            const renderP2 = myRole === 'p2' ? Math.max(s2, localMyClicks) : s2;
+        
+            document.getElementById('p1-score').innerText = `${renderP1} / 30`;
+            document.getElementById('p2-score').innerText = `${renderP2} / 30`;
+            document.getElementById('p1-bar').style.width = `${Math.min((renderP1 / 30) * 100, 100)}%`;
+            document.getElementById('p2-bar').style.width = `${Math.min((renderP2 / 30) * 100, 100)}%`;
         
             const btn = document.getElementById('click-btn');
             const statusText = document.getElementById('game-status');
@@ -297,20 +306,23 @@
             const gameId = parts[0];
             const roomId = parts[1];
             
+            localMyClicks++; // 绝对值安全递增，不依赖云端
+        
+            // 零延迟丝滑大底视觉响应
             if(myRole === 'p1') {
-                let current = parseInt(document.getElementById('p1-score').innerText) + 1;
-                document.getElementById('p1-score').innerText = `${current} / 30`;
-                document.getElementById('p1-bar').style.width = `${(current / 30) * 100}%`;
+                document.getElementById('p1-score').innerText = `${localMyClicks} / 30`;
+                document.getElementById('p1-bar').style.width = `${(localMyClicks / 30) * 100}%`;
             } else {
-                let current = parseInt(document.getElementById('p2-score').innerText) + 1;
-                document.getElementById('p2-score').innerText = `${current} / 30`;
-                document.getElementById('p2-bar').style.width = `${(current / 30) * 100}%`;
+                document.getElementById('click-btn');
+                document.getElementById('p2-score').innerText = `${localMyClicks} / 30`;
+                document.getElementById('p2-bar').style.width = `${(localMyClicks / 30) * 100}%`;
             }
         
+            // 上报最新绝对手速计数
             await fetch('/api/room?action=click', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ roomId, gameId, player: myRole })
+                body: JSON.stringify({ roomId, gameId, player: myRole, totalClicks: localMyClicks })
             });
         }
         
