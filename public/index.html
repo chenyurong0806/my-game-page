@@ -3,70 +3,165 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>我的联机小游戏合集</title>
+    <title>⚡ PixelArcade | 联机小游戏合集</title>
     <style>
-        body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }
-        .view { display: none; }
-        .active { display: block; }
-        .card { border: 1px solid #ccc; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
-        button { padding: 10px 20px; font-size: 16px; cursor: pointer; background: #0070f3; color: white; border: none; border-radius: 5px; }
-        button:hover { background: #0051a8; }
-        .score-board { display: flex; justify-content: space-around; font-size: 24px; margin: 20px 0; }
+        /* 全局现代暗黑风格 */
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --primary: #3b82f6;
+            --primary-glow: rgba(59, 130, 246, 0.5);
+            --accent-p1: #ec4899;
+            --accent-p2: #10b981;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; transition: all 0.2s ease; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+            background-color: var(--bg-color); 
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 40px 20px;
+        }
+
+        .container { width: 100%; max-width: 640px; }
+        
+        /* 视图控制 */
+        .view { display: none; opacity: 0; transform: translateY(10px); }
+        .view.active { display: block; opacity: 1; transform: translateY(0); }
+
+        /* 头部与卡片设计 */
+        header { text-align: center; margin-bottom: 40px; }
+        header h1 { font-size: 2.5rem; font-weight: 800; background: linear-gradient(to right, #3b82f6, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 8px; }
+        
+        .card { 
+            background: var(--card-bg); 
+            border: 1px solid #334155; 
+            border-radius: 16px; 
+            padding: 24px; 
+            margin-bottom: 20px;
+            box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
+        }
+        .card:hover { border-color: #475569; transform: translateY(-2px); }
+
+        /* 字体与文本 */
+        h2 { font-size: 1.5rem; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+        p { color: var(--text-muted); font-size: 0.95rem; line-height: 1.6; }
+        
+        /* 高级渐变按钮 */
+        button { 
+            padding: 12px 24px; font-size: 1rem; font-weight: 600; cursor: pointer; 
+            color: white; background: linear-gradient(135deg, #3b82f6, #2563eb);
+            border: none; border-radius: 12px; box-shadow: 0 4px 12px var(--primary-glow);
+        }
+        button:hover { transform: translateY(-1px); box-shadow: 0 6px 20px var(--primary-glow); background: linear-gradient(135deg, #4f46e5, #3b82f6); }
+        button:disabled { background: #334155 !important; color: #64748b !important; cursor: not-allowed; box-shadow: none !important; transform: none !important; }
+        
+        .btn-secondary { background: #334155; color: var(--text-main); box-shadow: none; margin-bottom: 20px; padding: 8px 16px; font-size: 0.9rem;}
+        .btn-secondary:hover { background: #475569; box-shadow: none; }
+
+        /* 房间列表样式 */
+        ul { list-style: none; }
+        .room-item { 
+            display: flex; justify-content: space-between; align-items: center; 
+            padding: 14px; background: #111827; border-radius: 10px; margin-top: 10px;
+            border: 1px solid #1e293b;
+        }
+        .badge { padding: 4px 8px; font-size: 0.75rem; font-weight: bold; border-radius: 6px; }
+        .badge.waiting { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+        .badge.playing { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+
+        /* 游戏对抗房间（核心UI） */
+        .vs-container { display: flex; flex-direction: column; gap: 20px; margin: 25px 0; }
+        .player-row { display: flex; flex-direction: column; gap: 6px; }
+        .player-info { display: flex; justify-content: space-between; font-weight: bold; font-size: 1.05rem; }
+        
+        /* 实时动态进度条 */
+        .progress-track { width: 100%; height: 16px; background: #111827; border-radius: 8px; overflow: hidden; border: 1px solid #334155; }
+        .progress-bar { height: 100%; width: 0%; border-radius: 8px; box-shadow: 0 0 10px rgba(255,255,255,0.1); }
+        #p1-bar { background: linear-gradient(90deg, #ec4899, #f43f5e); }
+        #p2-bar { background: linear-gradient(90deg, #10b981, #059669); }
+
+        #game-status { text-align: center; font-size: 1.2rem; font-weight: bold; margin: 15px 0; color: #f59e0b; min-height: 28px;}
+        .huge-click-btn { width: 100%; padding: 25px; font-size: 1.5rem; letter-spacing: 2px; background: linear-gradient(135deg, #ef4444, #3b82f6); box-shadow: 0 8px 30px rgba(239, 68, 68, 0.4); }
     </style>
 </head>
 <body>
 
-    <div id="view-home" class="view">
-        <h2>🎮 联机小游戏合集</h2>
-        <div class="card">
-            <h3>点击速度大赛 (click-race)</h3>
-            <p>比比看谁先点击满 30 次！狂戳按钮获得胜利。</p>
-            <button onclick="navigateTo('/click-race')">进入游戏大厅</button>
-        </div>
-    </div>
+    <div class="container">
+        <header>
+            <h1>PixelArcade</h1>
+            <p>轻量级、零延迟的 Serverless 联机对战空间</p>
+        </header>
 
-    <div id="view-lobby" class="view">
-        <button onclick="navigateTo('/')">← 返回首页</button>
-        <h2 id="lobby-title">游戏大厅</h2>
-        <div class="card">
-            <h3>📜 游戏规则</h3>
-            <p id="lobby-rules">加载中...</p>
-        </div>
-        <div class="card">
-            <h3>🏠 房间列表</h3>
-            <button onclick="createRoom()">➕ 创建新房间</button>
-            <ul id="room-list" style="margin-top: 15px;">正在加载房间列表...</ul>
-        </div>
-    </div>
-
-    <div id="view-game" class="view">
-        <button onclick="leaveRoom()">← 退出房间</button>
-        <h2 id="game-title">游戏房间</h2>
-        <p id="player-identity" style="color: #666;"></p>
-        
-        <div class="card">
-            <div class="score-board">
-                <div>玩家 1 (房主): <span id="p1-score">0</span> /30</div>
-                <div>玩家 2 (挑战者): <span id="p2-score">0</span> /30</div>
+        <div id="view-home" class="view">
+            <div class="card">
+                <h2>⚡ 点击速度大赛 (click-race)</h2>
+                <p style="margin-bottom: 20px;">纯粹的手速博弈！邀请好友进入房间，最先狂戳满 30 次的人将统治赛场。</p>
+                <button onclick="navigateTo('/click-race')">进入游戏大厅</button>
             </div>
-            <p id="game-status" style="text-align:center; font-weight:bold; font-size:18px;"></p>
-            <div style="text-align: center; margin-top: 20px;">
-                <button id="click-btn" onclick="sendClick()" disabled>🔥 猛烈点击！</button>
+        </div>
+
+        <div id="view-lobby" class="view">
+            <button class="btn-secondary" onclick="navigateTo('/')">← 返回主页</button>
+            <div class="card">
+                <h2 id="lobby-title">游戏大厅</h2>
+                <p id="lobby-rules" style="margin-top: 5px;"></p>
+            </div>
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3>🏠 活跃房间</h3>
+                    <button onclick="createRoom()" style="padding: 8px 16px; font-size: 0.9rem;">+ 创建房间</button>
+                </div>
+                <ul id="room-list"></ul>
+            </div>
+        </div>
+
+        <div id="view-game" class="view">
+            <button class="btn-secondary" onclick="leaveRoom()">← 退出房间</button>
+            <div class="card">
+                <h2 id="game-title">游戏房间</h2>
+                <span id="player-identity" class="badge" style="background: #334155; color: var(--text-main); display: inline-block; margin-top: 5px;"></span>
+                
+                <div class="vs-container">
+                    <div class="player-row">
+                        <div class="player-info">
+                            <span style="color: var(--accent-p1);">房主 (P1)</span>
+                            <span id="p1-score">0 / 30</span>
+                        </div>
+                        <div class="progress-track"><div id="p1-bar" class="progress-bar"></div></div>
+                    </div>
+                    <div class="player-row">
+                        <div class="player-info">
+                            <span style="color: var(--accent-p2);">挑战者 (P2)</span>
+                            <span id="p2-score">0 / 30</span>
+                        </div>
+                        <div class="progress-track"><div id="p2-bar" class="progress-bar"></div></div>
+                    </div>
+                </div>
+
+                <div id="game-status"></div>
+                
+                <button id="click-btn" class="huge-click-btn" onclick="sendClick()" disabled>🔥 猛烈点击！</button>
             </div>
         </div>
     </div>
 
     <script>
-        // 游戏配置
+        // 【核心路由与联机逻辑保持一致，完美兼容后端 Cloudflare Functions】
         const GAME_CONFIGS = {
-            'click-race': { name: '点击速度大赛', rules: '两名玩家加入房间。游戏开始后，最先点击按钮满 30 次的玩家获胜！' }
+            'click-race': { name: '🏎️ 点击速度大赛', rules: '游戏开始后，双方玩家疯狂点击下方红蓝巨型按钮。每次点击都会为你的能量条充能，率先冲满 30 次的用户直接获胜！' }
         };
 
         let currentPath = '';
         let pollingInterval = null;
-        let myRole = null; // 'p1' 或 'p2'
+        let myRole = null;
 
-        // 前端路由解析
         function route() {
             clearInterval(pollingInterval);
             currentPath = window.location.pathname;
@@ -75,19 +170,17 @@
             document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
 
             if (parts.length === 0) {
-                // 路径为 /
                 document.getElementById('view-home').classList.add('active');
             } else if (parts.length === 1) {
-                // 路径为 /游戏名
                 const gameId = parts[0];
                 if (!GAME_CONFIGS[gameId]) return alert('游戏不存在');
                 
-                document.getElementById('view-lobby').classList.add('active');
+                const lobby = document.getElementById('view-lobby');
+                lobby.classList.add('active');
                 document.getElementById('lobby-title').innerText = GAME_CONFIGS[gameId].name;
                 document.getElementById('lobby-rules').innerText = GAME_CONFIGS[gameId].rules;
                 fetchRooms(gameId);
             } else if (parts.length === 2) {
-                // 路径为 /游戏名/房间号
                 document.getElementById('view-game').classList.add('active');
                 initGameRoom(parts[0], parts[1]);
             }
@@ -100,22 +193,30 @@
         window.onpopstate = route;
         window.onload = route;
 
-        // 大厅逻辑：获取房间列表
         async function fetchRooms(gameId) {
-            const res = await fetch(`/api/room?action=list&gameId=${gameId}`);
-            const rooms = await res.json();
             const ul = document.getElementById('room-list');
-            ul.innerHTML = rooms.length === 0 ? '当前暂无房间，快去创建一个吧！' : '';
-            rooms.forEach(r => {
-                const li = document.createElement('li');
-                li.style.margin = '10px 0';
-                li.innerHTML = `房间 #${r.id} (${r.status === 'waiting' ? '等待中' : '游戏中'}) 
-                    <button style="padding:4px 10px; font-size:12px;" onclick="navigateTo('${currentPath}/${r.id}')" ${r.status !== 'waiting'?'disabled':''}>加入</button>`;
-                ul.appendChild(li);
-            });
+            ul.innerHTML = '<p style="text-align:center; padding: 20px;">正在探测时空房间...</p>';
+            try {
+                const res = await fetch(`/api/room?action=list&gameId=${gameId}`);
+                const rooms = await res.json();
+                ul.innerHTML = rooms.length === 0 ? '<p style="text-align:center; color:#64748b; padding: 20px;">当前暂无房间，快去创建一个吧！</p>' : '';
+                rooms.forEach(r => {
+                    const li = document.createElement('li');
+                    li.className = 'room-item';
+                    const statusText = r.status === 'waiting' ? '等待中' : '游戏中';
+                    const badgeClass = r.status === 'waiting' ? 'waiting' : 'playing';
+                    li.innerHTML = `
+                        <div>
+                            <strong style="color:#f8fafc;">房间 #${r.id}</strong>
+                            <span class="badge ${badgeClass}" style="margin-left:8px;">${statusText}</span>
+                        </div>
+                        <button style="padding:6px 14px; font-size:0.85rem;" onclick="navigateTo('${currentPath}/${r.id}')" ${r.status !== 'waiting'?'disabled':''}>加入对局</button>
+                    `;
+                    ul.appendChild(li);
+                });
+            } catch(e) { ul.innerHTML = '<p style="text-align:center; color:#ef4444;">未检测到绑定的云端 KV 数据库</p>'; }
         }
 
-        // 大厅逻辑：创建房间
         async function createRoom() {
             const gameId = window.location.pathname.split('/').filter(Boolean)[0];
             const res = await fetch('/api/room?action=create', {
@@ -127,12 +228,10 @@
             navigateTo(`/${gameId}/${data.roomId}`);
         }
 
-        // 房间逻辑：初始化并开启轮询同步
         function initGameRoom(gameId, roomId) {
-            document.getElementById('game-title').innerText = `${GAME_CONFIGS[gameId].name} - 房间 #${roomId}`;
+            document.getElementById('game-title').innerText = `房间 #${roomId}`;
             myRole = localStorage.getItem(`room_${roomId}_role`) || null;
             
-            // 每 1 秒向服务器查询一次房间最新状态（简单轮询实现联机）
             pollRoomStatus(gameId, roomId);
             pollingInterval = setInterval(() => pollRoomStatus(gameId, roomId), 1000);
         }
@@ -146,25 +245,32 @@
             }
             const room = await res.json();
 
-            // 如果本地没有身份，根据当前房间人数分配身份
             if (!myRole) {
                 if (!room.p1) { myRole = 'p1'; } 
                 else if (!room.p2) { myRole = 'p2'; } 
-                else { myRole = 'audience'; } // 观众
+                else { myRole = 'audience'; }
                 localStorage.setItem(`room_${roomId}_role`, myRole);
             }
 
-            document.getElementById('player-identity').innerText = `您的身份：${myRole === 'p1' ? '房主 (P1)' : myRole === 'p2' ? '挑战者 (P2)' : '观众'}`;
-            document.getElementById('p1-score').innerText = room.p1Score || 0;
-            document.getElementById('p2-score').innerText = room.p2Score || 0;
+            const roleNames = { 'p1': '⚡ 房主 (P1)', 'p2': '🎯 挑战者 (P2)', 'audience': '👁️ 赛事观察员 (观众)' };
+            document.getElementById('player-identity').innerText = roleNames[myRole];
+            
+            // 更新数字分数
+            const s1 = room.p1Score || 0;
+            const s2 = room.p2Score || 0;
+            document.getElementById('p1-score').innerText = `${s1} / 30`;
+            document.getElementById('p2-score').innerText = `${s2} / 30`;
+
+            // 【高光改进】动态计算并更新能量进度条
+            document.getElementById('p1-bar').style.width = `${Math.min((s1 / 30) * 100, 100)}%`;
+            document.getElementById('p2-bar').style.width = `${Math.min((s2 / 30) * 100, 100)}%`;
 
             const btn = document.getElementById('click-btn');
             const statusText = document.getElementById('game-status');
 
             if (room.status === 'waiting') {
-                statusText.innerText = '⏳ 等待挑战者加入...';
+                statusText.innerText = '⏳ 等待挑战者扫描并进入房间...';
                 btn.disabled = true;
-                // 如果你是P2，且进来了，自动通知后端加入
                 if (myRole === 'p2' && room.p2 !== 'joined') {
                     await fetch('/api/room?action=join', {
                         method: 'POST',
@@ -173,26 +279,38 @@
                     });
                 }
             } else if (room.status === 'playing') {
-                statusText.innerText = '🚀 比赛进行中，快戳！';
+                statusText.innerText = '🚀 比赛开始！开始狂飙手速！';
+                statusText.style.color = '#10b981';
                 btn.disabled = myRole === 'audience';
             } else if (room.status === 'finished') {
-                statusText.innerText = `🎉 游戏结束！胜利者是：${room.winner === 'p1' ? '房主 (P1)' : '挑战者 (P2)'}`;
+                const winnerText = room.winner === 'p1' ? '房主 (P1)' : '挑战者 (P2)';
+                statusText.innerText = `🎉 🏆 比赛结束！胜利者是：${winnerText}`;
+                statusText.style.color = '#ec4899';
                 btn.disabled = true;
                 clearInterval(pollingInterval);
             }
         }
 
-        // 房间逻辑：发送点击动作
         async function sendClick() {
             if (myRole !== 'p1' && myRole !== 'p2') return;
             const parts = window.location.pathname.split('/').filter(Boolean);
+            
+            // 前端先做预增，让连击视觉完全不卡顿（乐观更新）
+            if(myRole === 'p1') {
+                let current = parseInt(document.getElementById('p1-score').innerText) + 1;
+                document.getElementById('p1-score').innerText = `${current} / 30`;
+                document.getElementById('p1-bar').style.width = `${(current / 30) * 100}%`;
+            } else {
+                let current = parseInt(document.getElementById('p2-score').innerText) + 1;
+                document.getElementById('p2-score').innerText = `${current} / 30`;
+                document.getElementById('p2-bar').style.width = `${(current / 30) * 100}%`;
+            }
+
             await fetch('/api/room?action=click', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ roomId: parts[1], player: myRole })
             });
-            // 立即刷新数据，提升连击流畅感
-            pollRoomStatus(parts[0], parts[1]);
         }
 
         function leaveRoom() {
