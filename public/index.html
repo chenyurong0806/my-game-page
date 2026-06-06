@@ -196,7 +196,8 @@
             const ul = document.getElementById('room-list');
             ul.innerHTML = '<p style="text-align:center; padding: 20px;">正在探测时空房间...</p>';
             try {
-                const res = await fetch(`/api/room?action=list&gameId=${gameId}`);
+                // 【核心修复】大厅列表加入时间戳防缓存
+                const res = await fetch(`/api/room?action=list&gameId=${gameId}&_t=${Date.now()}`);
                 const rooms = await res.json();
                 ul.innerHTML = rooms.length === 0 ? '<p style="text-align:center; color:#64748b; padding: 20px;">当前暂无房间，快去创建一个吧！</p>' : '';
                 rooms.forEach(r => {
@@ -224,7 +225,6 @@
                 body: JSON.stringify({ gameId })
             });
             const data = await res.json();
-            // 【核心修复】创建完成的瞬间，立刻本地锁死房主身份
             localStorage.setItem(`room_${data.roomId}_role`, 'p1');
             navigateTo(`/${gameId}/${data.roomId}`);
         }
@@ -238,8 +238,8 @@
         }
         
         async function pollRoomStatus(gameId, roomId) {
-            // 【核心修复】请求带上 gameId，让后端可以执行强一致性直接获取
-            const res = await fetch(`/api/room?action=status&roomId=${roomId}&gameId=${gameId}`);
+            // 【核心修复】房间状态轮询加入时间戳 _t=${Date.now()}，强迫浏览器和云端同步最新状态
+            const res = await fetch(`/api/room?action=status&roomId=${roomId}&gameId=${gameId}&_t=${Date.now()}`);
             if (res.status === 404) {
                 alert('房间已被销毁或不存在');
                 navigateTo(`/${gameId}`);
@@ -275,7 +275,7 @@
                     await fetch('/api/room?action=join', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ roomId, gameId }) // 传入 gameId
+                        body: JSON.stringify({ roomId, gameId })
                     });
                 }
             } else if (room.status === 'playing') {
@@ -310,7 +310,7 @@
             await fetch('/api/room?action=click', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ roomId, gameId, player: myRole }) // 传入 gameId
+                body: JSON.stringify({ roomId, gameId, player: myRole })
             });
         }
         
