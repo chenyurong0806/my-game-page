@@ -88,29 +88,29 @@
     <script>
         const SUPABASE_URL = 'https://mamubvgmcetepllznifl.supabase.co'; 
         const SUPABASE_ANON_KEY = 'sb_publishable_HEeNPSqD75cWlnmZjcVHKA_Pw-OdL_A';
-
+    
         const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
+    
         const gameId = 'snake';
         let myRole = null;
         let gameChannel = null;
         let gameTicker = null; 
         let gameOver = false;
         let isCountingDown = false; 
-
+    
         const urlParams = new URLSearchParams(window.location.search);
         const roomId = urlParams.get('roomId');
-
+    
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         const grid = 20; 
-
+    
         let food = { x: 200, y: 200 };
         let snake1 = [{ x: 60, y: 100 }, { x: 40, y: 100 }, { x: 20, y: 100 }]; 
         let snake2 = [{ x: 320, y: 280 }, { x: 340, y: 280 }, { x: 360, y: 280 }]; 
         let d1 = 'RIGHT'; 
         let d2 = 'LEFT';  
-
+    
         async function init() {
             if (!roomId) {
                 document.getElementById('view-lobby').classList.add('active');
@@ -120,21 +120,19 @@
                 document.getElementById('game-title').innerText = `房间 #${roomId}`;
                 myRole = localStorage.getItem(`room_${roomId}_role`);
                 
-                // 1. 进房间先通过底座同步身份，如果是 P2 则通知 KV 自己进来了
                 await syncBaseRoomStatus();
-
+    
                 if (SUPABASE_URL === 'YOUR_SUPABASE_URL') {
                     document.getElementById('game-status').innerText = '❌ 未配置 Supabase 密钥';
                     return;
                 }
-
-                // 2. ✨ 连接实时长连接
+    
                 connectSupabaseRealtime();
                 setupKeyboardControls();
                 draw(); 
             }
         }
-
+    
         async function fetchRooms() {
             const ul = document.getElementById('room-list');
             ul.innerHTML = '<p style="text-align:center;">正在探测活跃房间...</p>';
@@ -151,69 +149,103 @@
                 ul.appendChild(li);
             });
         }
-
+    
         async function createRoom() {
             const res = await fetch('/api/room?action=create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameId }) });
             const data = await res.json();
             localStorage.setItem(`room_${data.roomId}_role`, 'p1');
             window.location.href = `?roomId=${data.roomId}`;
         }
-
+    
         async function syncBaseRoomStatus() {
             const res = await fetch(`/api/room?action=status&roomId=${roomId}&gameId=${gameId}&_t=${Date.now()}`);
             if (res.status === 404) { alert('房间不存在'); window.location.href = '/snake.html'; return; }
             const room = await res.json();
-
+    
             if (!myRole) {
                 if (!room.p1) myRole = 'p1';
                 else if (!room.p2) myRole = 'p2';
                 else myRole = 'audience';
                 localStorage.setItem(`room_${roomId}_role`, myRole);
             }
-
+    
             document.getElementById('player-identity').innerText = { 'p1': '⚡ 房主 (P1) · 粉蛇', 'p2': '🎯 挑战者 (P2) · 绿蛇', 'audience': '👁️ 观众' }[myRole];
             
-            // 如果我是 P2，向底座发送加入请求
             if (room.status === 'waiting' && myRole === 'p2' && room.p2 !== 'joined') {
                 await fetch('/api/room?action=join', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomId, gameId }) });
             }
         }
-
+    
         function connectSupabaseRealtime() {
             gameChannel = supabaseClient.channel(`snake-room-${roomId}`);
-
+    
             gameChannel
                 .on('broadcast', { event: 'direction-update' }, (payload) => {
                     const data = payload.payload;
                     if (data.player === 'p1') d1 = data.dir;
                     if (data.player === 'p2') d2 = data.dir;
                 })
+                .on('broadcast', { event: 'p2-ready' }, () => {
+                    // 📡 房主 P1 专属监听到：P2 已经进屋并举手了
+                    if (myRole === 'p1') {
+                        // 1. P1 率先在本地开启倒计时
+                        runFiveSecondCountdown();
+                        // 2. P1 随机生成食物
+                        generateFoodCoords();
+                        // 3. P1 广播开赛指令给 P2，顺便带上食物坐标
+                        gameChannel.send({
+                            type: 'broadcast',
+                            event: 'start-countdown',
+                            payload: { initialFood: food }
+                        });
+                    }
+                })
+                .on('broadcast', { event: 'start-countdown' }, (payload) => {
+                    // 📡 挑战者 P2 监听到：房主发来了开赛指令
+                    if (myRole === 'p2' || myRole === 'audience') {
+                        // 同步房主发过来的初始化食物
+                        if (payload.payload && payload.payload.initialFood) {
+                            food = payload.payload.initialFood;
+                        }
+                        runFiveSecondCountdown();
+                    }
+                })
                 .on('broadcast', { event: 'food-update' }, (payload) => {
                     food = payload.payload.food;
                 })
-                .on('broadcast', { event: 'start-countdown' }, () => {
-                    // 🔔 核心修正：不管是 P1 还是 P2 发出的，只要收到倒计时信号，全员立刻无条件强制倒计时
-                    runFiveSecondCountdown();
-                })
                 .subscribe((status) => {
                     if (status === 'SUBSCRIBED') {
-                        // 通道完全订阅建立成功后：
-                        if (myRole === 'p1') {
-                            document.getElementById('game-status').innerText = '⏳ 连通成功！等待挑战者进屋...';
-                        }
+                        // 检查一下如果是单人重连或掉线
+                        checkRoomStateOnSubscribe();
+    
+                        // 🤝 握手开始：如果是 P2 进屋，隔 800 毫秒（确保通道完全咬合）向房主发送就位广播
                         if (myRole === 'p2') {
-                            document.getElementById('game-status').innerText = '⚡ 已连接，正在向房主发射就位信号...';
-                            // 🚀 核心飞跃：P2 进来后，通过 Supabase 零延迟通道向全房间广播：“我已经好了，大家一起倒计时！”
                             setTimeout(() => {
-                                gameChannel.send({ type: 'broadcast', event: 'start-countdown', payload: {} });
-                            }, 500);
+                                gameChannel.send({ type: 'broadcast', event: 'p2-ready', payload: {} });
+                            }, 800);
                         }
                     }
                 });
         }
-
+    
+        async function checkRoomStateOnSubscribe() {
+            const res = await fetch(`/api/room?action=status&roomId=${roomId}&gameId=${gameId}&_t=${Date.now()}`);
+            const room = await res.json();
+            const statusText = document.getElementById('game-status');
+    
+            if (room.status === 'waiting') {
+                statusText.innerText = '⏳ 连通成功！等待挑战者进屋...';
+            } else if (room.status === 'playing' && !isCountingDown && !gameTicker) {
+                // 防御：如果是中途断线重连，直接开跑
+                statusText.innerText = '🟢 激战中！冲啊！';
+                gameTicker = setInterval(gameLoop, 150); 
+            } else if (room.status === 'finished') {
+                statusText.innerText = '🏁 比赛已结束';
+            }
+        }
+    
         function runFiveSecondCountdown() {
-            if (isCountingDown) return; // 防止重复触发
+            if (isCountingDown) return; 
             isCountingDown = true;
             
             let count = 5;
@@ -223,10 +255,7 @@
             overlay.style.display = 'flex';
             overlay.innerText = count;
             statusText.innerText = `🚦 双方连通完毕！对决将在 ${count} 秒后开启！`;
-
-            // 由 P1 主机统一随机生成水果，并广播给 P2，确保两边水果格子绝对一致
-            if (myRole === 'p1') { generateAndBroadcastFood(); }
-
+    
             let timer = setInterval(() => {
                 count--;
                 if (count > 0) {
@@ -235,8 +264,6 @@
                 } else if (count === 0) {
                     overlay.innerText = 'GO!';
                     statusText.innerText = '🚀 比赛爆发！狂飚方向！';
-                    
-                    // 只有在这里才启动循环，之前两条蛇死死冻结
                     gameTicker = setInterval(gameLoop, 150);
                 } else {
                     clearInterval(timer);
@@ -245,7 +272,7 @@
                 }
             }, 1000);
         }
-
+    
         function setupKeyboardControls() {
             document.addEventListener('keydown', (e) => {
                 if (gameOver || isCountingDown || (myRole !== 'p1' && myRole !== 'p2')) return;
@@ -255,11 +282,11 @@
                 if (e.key === 's' || e.key === 'ArrowDown') requestedDir = 'DOWN';
                 if (e.key === 'a' || e.key === 'ArrowLeft') requestedDir = 'LEFT';
                 if (e.key === 'd' || e.key === 'ArrowRight') requestedDir = 'RIGHT';
-
+    
                 if (requestedDir) changeDirection(requestedDir);
             });
         }
-
+    
         function changeDirection(newDir) {
             if (isCountingDown) return; 
             let currentDir = myRole === 'p1' ? d1 : d2;
@@ -268,43 +295,49 @@
             if (newDir === 'DOWN' && currentDir === 'UP') return;
             if (newDir === 'LEFT' && currentDir === 'RIGHT') return;
             if (newDir === 'RIGHT' && currentDir === 'LEFT') return;
-
+    
             if (myRole === 'p1') d1 = newDir;
             if (myRole === 'p2') d2 = newDir;
-
+    
             gameChannel.send({
                 type: 'broadcast',
                 event: 'direction-update',
                 payload: { player: myRole, dir: newDir }
             });
         }
-
-        function generateAndBroadcastFood() {
+    
+        // 纯计算食物坐标
+        function generateFoodCoords() {
             food = {
                 x: Math.floor(Math.random() * (canvas.width / grid)) * grid,
                 y: Math.floor(Math.random() * (canvas.height / grid)) * grid
             };
+        }
+    
+        // 局中吃了之后实时广播
+        function generateAndBroadcastFood() {
+            generateFoodCoords();
             gameChannel.send({ type: 'broadcast', event: 'food-update', payload: { food } });
         }
-
+    
         function gameLoop() {
             if (gameOver) return;
-
+    
             let p1Head = { x: snake1[0].x, y: snake1[0].y };
             if (d1 === 'RIGHT') p1Head.x += grid;
             if (d1 === 'LEFT')  p1Head.x -= grid;
             if (d1 === 'UP')    p1Head.y -= grid;
             if (d1 === 'DOWN')  p1Head.y += grid;
-
+    
             let p2Head = { x: snake2[0].x, y: snake2[0].y };
             if (d2 === 'RIGHT') p2Head.x += grid;
             if (d2 === 'LEFT')  p2Head.x -= grid;
             if (d2 === 'UP')    p2Head.y -= grid;
             if (d2 === 'DOWN')  p2Head.y += grid;
-
+    
             let p1Eats = (p1Head.x === food.x && p1Head.y === food.y);
             let p2Eats = (p2Head.x === food.x && p2Head.y === food.y);
-
+    
             snake1.unshift(p1Head);
             if (p1Eats) {
                 document.getElementById('p1-score').innerText = snake1.length;
@@ -312,38 +345,38 @@
             } else {
                 snake1.pop();
             }
-
+    
             snake2.unshift(p2Head);
             if (p2Eats) {
                 document.getElementById('p2-score').innerText = snake2.length;
             } else {
                 snake2.pop();
             }
-
+    
             checkCollisions();
             draw();
         }
-
+    
         function checkCollisions() {
             const h1 = snake1[0];
             const h2 = snake2[0];
             let p1Dead = false;
             let p2Dead = false;
-
+    
             if (h1.x < 0 || h1.x >= canvas.width || h1.y < 0 || h1.y >= canvas.height) p1Dead = true;
             if (h2.x < 0 || h2.x >= canvas.width || h2.y < 0 || h2.y >= canvas.height) p2Dead = true;
-
+    
             snake1.forEach((part, index) => { if (index > 0 && h1.x === part.x && h1.y === part.y) p1Dead = true; });
             snake2.forEach(part => { if (h1.x === part.x && h1.y === part.y) p1Dead = true; });
-
+    
             snake2.forEach((part, index) => { if (index > 0 && h2.x === part.x && h2.y === part.y) p2Dead = true; });
             snake1.forEach(part => { if (h2.x === part.x && h2.y === part.y) p2Dead = true; });
-
+    
             if (p1Dead || p2Dead) {
                 gameOver = true;
                 clearInterval(gameTicker);
                 const statusText = document.getElementById('game-status');
-
+    
                 if (p1Dead && p2Dead) {
                     statusText.innerText = '💥 惨烈！双方同时玉石俱焚（平局）！';
                 } else if (p1Dead) {
@@ -355,7 +388,7 @@
                 }
             }
         }
-
+    
         function archiveWinner(winner) {
             if (myRole === winner) {
                 fetch('/api/room?action=click', {
@@ -365,35 +398,35 @@
                 });
             }
         }
-
+    
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-
+    
             ctx.strokeStyle = '#1e293b';
             for (let i = 0; i < canvas.width; i += grid) {
                 ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); ctx.stroke();
                 ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(canvas.width, i); ctx.stroke();
             }
-
+    
             ctx.fillStyle = '#ef4444';
             ctx.shadowBlur = 10; ctx.shadowColor = '#ef4444';
             ctx.fillRect(food.x, food.y, grid - 2, grid - 2);
             ctx.shadowBlur = 0; 
-
+    
             ctx.fillStyle = '#ec4899';
             snake1.forEach((part, index) => {
                 if (index === 0) ctx.fillStyle = '#f472b6'; 
                 else ctx.fillStyle = '#ec4899';
                 ctx.fillRect(part.x, part.y, grid - 2, grid - 2);
             });
-
+    
             snake2.forEach((part, index) => {
                 if (index === 0) ctx.fillStyle = '#34d399'; 
                 else ctx.fillStyle = '#10b981';
                 ctx.fillRect(part.x, part.y, grid - 2, grid - 2);
             });
         }
-
+    
         init();
     </script>
 </body>
