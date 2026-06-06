@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🐍 双人联机贪吃蛇大决战（5秒倒计时版）</title>
+    <title>🐍 双人联机贪吃蛇大决战（Supabase 强同步版）</title>
     <style>
         :root { --bg-color: #0f172a; --card-bg: #1e293b; --text-main: #f8fafc; --text-muted: #94a3b8; --primary: #3b82f6; --p1-color: #ec4899; --p2-color: #10b981; }
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -18,18 +18,16 @@
         .badge { padding: 4px 8px; font-size: 0.75rem; font-weight: bold; border-radius: 6px; }
         .score-board { display: flex; justify-content: space-between; margin: 15px 0; font-size: 1.1rem; font-weight: bold; }
         
-        /* 游戏画布与大数字倒计时叠加样式 */
         #canvas-container { display: flex; justify-content: center; margin: 20px 0; position: relative; }
         canvas { background: #020617; border: 4px solid #334155; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5); }
         
-        /* 屏幕正中央的大倒计时特效 */
         #countdown-overlay { 
             position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
             display: flex; justify-content: center; align-items: center; 
             font-size: 5rem; font-weight: bold; color: #f59e0b; 
             text-shadow: 0 0 20px rgba(245, 158, 11, 0.6);
-            pointer-events: none; background: rgba(2, 6, 23, 0.4); border-radius: 12px;
-            display: none; /* 默认隐藏 */
+            pointer-events: none; background: rgba(2, 6, 23, 0.6); border-radius: 12px;
+            display: none; 
         }
 
         #game-status { text-align: center; font-size: 1.2rem; font-weight: bold; margin: 10px 0; color: #f59e0b; }
@@ -48,7 +46,7 @@
             <button class="btn-secondary" onclick="window.location.href='/'">← 返回主页</button>
             <div class="card">
                 <h2>🐍 双人实时对战贪吃蛇</h2>
-                <p>双方进入房间后，系统会自动进入 5 秒开赛倒计时！狂飙方向，抢占先机！</p>
+                <p>全面切断云端KV延迟干扰！当挑战者入场，全员由 Supabase 通道强制同步 5 秒倒计时开赛！</p>
             </div>
             <div class="card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
@@ -70,7 +68,7 @@
                     <span style="color: var(--p2-color)">挑战者 P2 长度: <span id="p2-score">3</span></span>
                 </div>
 
-                <div id="game-status">正在建立连接...</div>
+                <div id="game-status">正在连接通道...</div>
 
                 <div id="canvas-container">
                     <canvas id="gameCanvas" width="400" height="400"></canvas>
@@ -98,7 +96,7 @@
         let gameChannel = null;
         let gameTicker = null; 
         let gameOver = false;
-        let isCountingDown = false; // 新增：记录当前是否正在倒计时中
+        let isCountingDown = false; 
 
         const urlParams = new URLSearchParams(window.location.search);
         const roomId = urlParams.get('roomId');
@@ -122,14 +120,15 @@
                 document.getElementById('game-title').innerText = `房间 #${roomId}`;
                 myRole = localStorage.getItem(`room_${roomId}_role`);
                 
+                // 1. 进房间先通过底座同步身份，如果是 P2 则通知 KV 自己进来了
                 await syncBaseRoomStatus();
 
                 if (SUPABASE_URL === 'YOUR_SUPABASE_URL') {
                     document.getElementById('game-status').innerText = '❌ 未配置 Supabase 密钥';
-                    alert('请先配置 Supabase 密钥！');
                     return;
                 }
 
+                // 2. ✨ 连接实时长连接
                 connectSupabaseRealtime();
                 setupKeyboardControls();
                 draw(); 
@@ -174,12 +173,9 @@
 
             document.getElementById('player-identity').innerText = { 'p1': '⚡ 房主 (P1) · 粉蛇', 'p2': '🎯 挑战者 (P2) · 绿蛇', 'audience': '👁️ 观众' }[myRole];
             
-            // 当 P2 成功加入时，通知全员准备进入倒计时
+            // 如果我是 P2，向底座发送加入请求
             if (room.status === 'waiting' && myRole === 'p2' && room.p2 !== 'joined') {
                 await fetch('/api/room?action=join', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomId, gameId }) });
-                setTimeout(() => { 
-                    if (gameChannel) gameChannel.send({ type: 'broadcast', event: 'start-countdown', payload: {} }); 
-                }, 1200); // 稍微延时，确保两边连接都稳固
             }
         }
 
@@ -196,35 +192,28 @@
                     food = payload.payload.food;
                 })
                 .on('broadcast', { event: 'start-countdown' }, () => {
-                    // ✨ 核心亮点：接收到倒计时指令，两边电脑同时开跑倒计时
+                    // 🔔 核心修正：不管是 P1 还是 P2 发出的，只要收到倒计时信号，全员立刻无条件强制倒计时
                     runFiveSecondCountdown();
                 })
                 .subscribe((status) => {
                     if (status === 'SUBSCRIBED') {
-                        checkRoomStateAndRun();
+                        // 通道完全订阅建立成功后：
+                        if (myRole === 'p1') {
+                            document.getElementById('game-status').innerText = '⏳ 连通成功！等待挑战者进屋...';
+                        }
+                        if (myRole === 'p2') {
+                            document.getElementById('game-status').innerText = '⚡ 已连接，正在向房主发射就位信号...';
+                            // 🚀 核心飞跃：P2 进来后，通过 Supabase 零延迟通道向全房间广播：“我已经好了，大家一起倒计时！”
+                            setTimeout(() => {
+                                gameChannel.send({ type: 'broadcast', event: 'start-countdown', payload: {} });
+                            }, 500);
+                        }
                     }
                 });
         }
 
-        async function checkRoomStateAndRun() {
-            const res = await fetch(`/api/room?action=status&roomId=${roomId}&gameId=${gameId}&_t=${Date.now()}`);
-            const room = await res.json();
-            const statusText = document.getElementById('game-status');
-
-            if (room.status === 'waiting') {
-                statusText.innerText = '⏳ 等待挑战者加入房间...';
-            } else if (room.status === 'playing') {
-                // 如果刷进页面时游戏已经是进行中（比如掉线重连），直接启动不倒计时
-                statusText.innerText = '🟢 激战中！冲啊！';
-                gameTicker = setInterval(gameLoop, 150); 
-            } else if (room.status === 'finished') {
-                statusText.innerText = '🏁 比赛已结束';
-            }
-        }
-
-        // ✨ 触发 5 秒同步倒计时逻辑
         function runFiveSecondCountdown() {
-            if (isCountingDown) return;
+            if (isCountingDown) return; // 防止重复触发
             isCountingDown = true;
             
             let count = 5;
@@ -233,25 +222,25 @@
             
             overlay.style.display = 'flex';
             overlay.innerText = count;
-            statusText.innerText = `🚦 双方已就位，游戏将在 ${count} 秒后启动！`;
+            statusText.innerText = `🚦 双方连通完毕！对决将在 ${count} 秒后开启！`;
 
-            // 初始化生成一次水果坐标（由 P1 统一计算并广播，防止位置不一致）
+            // 由 P1 主机统一随机生成水果，并广播给 P2，确保两边水果格子绝对一致
             if (myRole === 'p1') { generateAndBroadcastFood(); }
 
             let timer = setInterval(() => {
                 count--;
                 if (count > 0) {
                     overlay.innerText = count;
-                    statusText.innerText = `🚦 双方已就位，游戏将在 ${count} 秒后启动！`;
+                    statusText.innerText = `🚦 双方连通完毕！对决将在 ${count} 秒后开启！`;
                 } else if (count === 0) {
                     overlay.innerText = 'GO!';
-                    statusText.innerText = '🚀 比赛开始！开始狂飙手速！';
+                    statusText.innerText = '🚀 比赛爆发！狂飚方向！';
                     
-                    // 倒计时彻底结束，启动核心移动状态主循环
+                    // 只有在这里才启动循环，之前两条蛇死死冻结
                     gameTicker = setInterval(gameLoop, 150);
                 } else {
                     clearInterval(timer);
-                    overlay.style.display = 'none'; // 藏起遮罩
+                    overlay.style.display = 'none'; 
                     isCountingDown = false;
                 }
             }, 1000);
@@ -259,7 +248,6 @@
 
         function setupKeyboardControls() {
             document.addEventListener('keydown', (e) => {
-                // 🛡️ 防御：如果正在倒计时，或游戏结束，或身为观众，按键无效
                 if (gameOver || isCountingDown || (myRole !== 'p1' && myRole !== 'p2')) return;
                 
                 let requestedDir = null;
@@ -273,7 +261,7 @@
         }
 
         function changeDirection(newDir) {
-            if (isCountingDown) return; // 倒计时期间禁止蛇移动
+            if (isCountingDown) return; 
             let currentDir = myRole === 'p1' ? d1 : d2;
             
             if (newDir === 'UP' && currentDir === 'DOWN') return;
