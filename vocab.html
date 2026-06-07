@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🐉 单词吞噬战 | 双人实时词汇PK</title>
+    <title>🐉 背单词大赛</title>
     <style>
         :root { --bg-color: #090d16; --card-bg: #151f32; --text-main: #f8fafc; --text-muted: #64748b; --primary: #3b82f6; --p1-color: #ec4899; --p2-color: #10b981; }
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -18,33 +18,27 @@
         .room-item { display: flex; justify-content: space-between; align-items: center; padding: 14px; background: #0f172a; border-radius: 10px; margin-top: 10px; }
         .badge { padding: 4px 8px; font-size: 0.75rem; font-weight: bold; border-radius: 6px; background: #22324d; display: inline-block; }
 
-        /* ✨ 对战双栏布局 */
+        /* 对战双栏布局 */
         .game-grid { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 24px; margin-top: 10px; }
-        
-        /* 左栏：答题区 */
         .quiz-panel { display: flex; flex-direction: column; justify-content: center; min-height: 420px; position: relative; }
         .word-display { font-size: 2.6rem; font-weight: bold; text-align: center; margin-bottom: 5px; letter-spacing: 1px; color: #f1f5f9; }
-        .phone-display { font-size: 1.1rem; color: #64748b; text-align: center; margin-bottom: 30px; font-family: sans-serif; }
+        .phone-display { font-size: 1.1rem; color: #64748b; text-align: center; margin-bottom: 30px; }
         .options-grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
         .option-btn { width: 100%; padding: 16px; text-align: left; font-size: 1.1rem; background: #1e293b; border: 1px solid #334155; color: #cbd5e1; border-radius: 12px; transition: all 0.15s ease; }
         .option-btn:not(:disabled):hover { background: #2d3748; border-color: var(--primary); transform: translateX(4px); }
         
-        /* 惩罚与锁定冷却层 */
+        /* 惩罚层 */
         .cooldown-overlay { display: none; position: absolute; top:0; left:0; width:100%; height:100%; background: rgba(9,13,22,0.95); border-radius:16px; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding: 20px; z-index: 10; }
         .cooldown-overlay.active { display: flex; }
         .correct-ans-tip { font-size: 1.4rem; color: #ef4444; font-weight: bold; margin-bottom: 10px; }
         .meaning-tip { font-size: 1.2rem; color: #94a3b8; margin-bottom: 20px; max-width: 80%; line-height: 1.5; }
         .cooldown-timer { font-size: 2.5rem; color: #f59e0b; font-weight: bold; }
 
-        /* 右栏：小蛇环形进度条区 */
         .snake-panel { display: flex; flex-direction: column; align-items: center; justify-content: center; }
         #canvas-container { position: relative; width: 300px; height: 300px; margin-bottom: 15px; }
-        canvas { background: transparent; }
         
-        /* 游戏结果结算单词表 */
-        .word-list-results { max-height: 280px; overflow-y: auto; margin-top: 15px; padding-right: 5px; border: 1px solid #1e293b; border-radius: 8px; }
+        .word-list-results { max-height: 250px; overflow-y: auto; margin-top: 15px; border: 1px solid #1e293b; border-radius: 8px; }
         .word-row { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #1e293b; font-size: 0.95rem; }
-        .word-row:last-child { border-bottom: none; }
         .word-row:nth-child(even) { background: #111c2e; }
 
         #game-status { text-align: center; font-size: 1.2rem; font-weight: bold; margin: 10px 0; color: #f59e0b; }
@@ -57,8 +51,8 @@
         <div id="view-lobby" class="view">
             <button class="btn-secondary" onclick="window.location.href='/'">← 返回主页</button>
             <div class="card">
-                <h2>🐉 单词吞噬战 (Vocabulary Duel)</h2>
-                <p>看英文选中文！每答对一题，你的环状巨龙就会拉长并咬掉对方一段尾巴！答错将被冰冻锁定 5 秒并强显正确释义复习。</p>
+                <h2>🐉 单词吞噬战</h2>
+                <p>看英文选中文！双方的巨龙在环形轨道上<b>首尾相连并同时顺时针追逐吞噬</b>！每答对一题，你的龙头就会向前暴长并咬断对方的尾巴！</p>
             </div>
             <div class="card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
@@ -70,10 +64,9 @@
         </div>
 
         <div id="view-game" class="view">
-            <button class="btn-secondary" onclick="window.location.href='/vocab.html'">← 退出房间</button>
-            
+            <button class="btn-secondary" onclick="handleActiveLeave()">← 退出房间</button>
             <h2 id="game-title" style="margin-bottom: 20px; letter-spacing: 1px;">游戏房间</h2>
-
+            
             <div class="game-grid">
                 <div class="card quiz-panel" id="quiz-card">
                     <div id="game-status">正在建立连接...</div>
@@ -98,7 +91,7 @@
                     <div id="result-area" style="display: none;">
                         <h3 id="win-status" style="font-size:1.4rem; margin-bottom:10px; color:#f59e0b; text-align:center;"></h3>
                         <div id="accuracy-report" style="text-align:center; margin-bottom:15px; color:#94a3b8;"></div>
-                        <h4>📋 本局考察的 30 个高考词汇：</h4>
+                        <h4>📋 本局考察单词复盘：</h4>
                         <div class="word-list-results" id="final-word-list"></div>
                     </div>
                 </div>
@@ -107,8 +100,8 @@
                     <span id="player-identity" class="badge"></span>
                     <div style="margin-top: 15px; width:100%;">
                         <div class="sync-stats">
-                            <span style="color:var(--p1-color)">P1 正确率: <span id="p1-acc">0%</span></span>
-                            <span style="color:var(--p2-color)">P2 正确率: <span id="p2-acc">0%</span></span>
+                            <span style="color:var(--p1-color)">P1: <span id="p1-acc">0%</span></span>
+                            <span style="color:var(--p2-color)">P2: <span id="p2-acc">0%</span></span>
                         </div>
                     </div>
                     
@@ -117,8 +110,8 @@
                     </div>
 
                     <div id="control-panel" style="margin-top: 10px; text-align: center; width:100%;">
-                        <button id="ready-btn" style="width:100%; display:none;" onclick="clickReady()">🤝 准备就绪</button>
-                        <button id="start-btn" style="width:100%; display:none;" onclick="hostStartGame()" disabled>🚀 开始对战 (等待P2准备)</button>
+                        <button id="ready-btn" style="width:100%; display:none;" onclick="clickReady()">准备就绪</button>
+                        <button id="start-btn" style="width:100%; display:none;" onclick="hostStartGame()" disabled>开始对战 (等待P2准备)</button>
                     </div>
                 </div>
             </div>
@@ -126,27 +119,26 @@
     </div>
 
     <script>
-        // ⚡ 请填入你的真实 Supabase 凭证
-        const SUPABASE_URL = 'https://mamubvgmcetepllznifl.supabase.co'; 
-        const SUPABASE_ANON_KEY = 'sb_publishable_HEeNPSqD75cWlnmZjcVHKA_Pw-OdL_A';
+        const SUPABASE_URL = 'YOUR_SUPABASE_URL'; 
+        const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
 
         const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
         const gameId = 'vocab-duel';
 
         let myRole = null;
         let gameChannel = null;
-        let fullDictionary = []; // 全量词库容器
-        let gameWords = [];      // 核心发牌包（包含当前局选中的30个词和混淆项）
+        let fullDictionary = []; 
+        let gameWords = [];      
 
-        // 对战动态计分板
         let currentIdx = 0;
         let p1Correct = 0, p1Total = 0;
         let p2Correct = 0, p2Total = 0;
         
-        let timeLeft = 120; // 120秒倒计时
+        let timeLeft = 120; 
         let timerInterval = null;
         let isP2Ready = false;
         let isGameOver = false;
+        let isGameStarted = false; // 是否已经真正开赛
 
         const urlParams = new URLSearchParams(window.location.search);
         const roomId = urlParams.get('roomId');
@@ -164,7 +156,7 @@
                 myRole = localStorage.getItem(`room_${roomId}_role`);
                 
                 await syncBaseRoomStatus();
-                await loadVocabulary(); // 🎯 加载并初始化词汇
+                await loadVocabulary(); 
 
                 if (SUPABASE_URL === 'YOUR_SUPABASE_URL') {
                     document.getElementById('game-status').innerText = '❌ 未配置 Supabase 密钥';
@@ -176,24 +168,48 @@
             }
         }
 
-        // 🎯 深度适配用户的新词典 schema 格式
+        // 🎯 核心增强：截取前 3 个释义的清洗算法
+        function cleanAndTruncateMeaning(transStr) {
+            if (!transStr) return "";
+            
+            // 识别常见前缀词性（如 v. / n. / adj. 等）
+            let prefix = "";
+            const prefixMatch = transStr.match(/^([a-z]+\.)\s*/i);
+            if (prefixMatch) {
+                prefix = prefixMatch[1];
+                transStr = transStr.substring(prefixMatch[0].length);
+            }
+
+            // 使用正规则切分顿号、逗号、分号及空格
+            let meanings = transStr.split(/[、，；,;\s]+/).filter(Boolean);
+            
+            // ⏳ 如果释义超过 3 个，强制只保留前 3 个
+            if (meanings.length > 3) {
+                meanings = meanings.slice(0, 3);
+            }
+            
+            return prefix + meanings.join('，');
+        }
+
         async function loadVocabulary() {
             try {
                 const res = await fetch('/GaoKao_3500.json');
                 const rawData = await res.json();
                 
-                // 进行格式防空清洗，确保格式强健
-                fullDictionary = rawData.filter(item => item && item.name && item.trans && item.trans.length > 0);
+                fullDictionary = rawData.filter(item => item && item.name && item.trans && item.trans.length > 0).map(item => {
+                    // 在加载时提前对释义数组的第一个主释义进行截断清洗
+                    item._cleanTrans = cleanAndTruncateMeaning(item.trans[0]);
+                    return item;
+                });
             } catch (e) {
-                console.error("词库文件加载失败，请确保 /GaoKao_3500.json 放置正确", e);
-                document.getElementById('game-status').innerText = '❌ 词库加载失败，请检查路径';
+                console.error("词库加载失败", e);
+                document.getElementById('game-status').innerText = '❌ 词库加载失败';
             }
         }
 
-        // 底座同步与大厅获取
         async function fetchRooms() {
             const ul = document.getElementById('room-list');
-            ul.innerHTML = '<p style="text-align:center;">正在检索时空单词房间...</p>';
+            ul.innerHTML = '<p style="text-align:center;">正在检索房间...</p>';
             const res = await fetch(`/api/room?action=list&gameId=${gameId}&_t=${Date.now()}`);
             const rooms = await res.json();
             ul.innerHTML = rooms.length === 0 ? '<p style="text-align:center; color:#64748b;">暂无房间，快去创建一个吧！</p>' : '';
@@ -223,23 +239,24 @@
                 else myRole = 'audience';
                 localStorage.setItem(`room_${roomId}_role`, myRole);
             }
-            document.getElementById('player-identity').innerText = { 'p1': '⚡ 房主 (P1) · 粉龙', 'p2': '🎯 挑战者 (P2) · 绿龙', 'audience': '👁️ 观众' }[myRole];
+            document.getElementById('player-identity').innerText = { 'p1': '房主 (P1) · 粉龙', 'p2': '挑战者 (P2) · 绿龙', 'audience': '观众' }[myRole];
             
             if (room.status === 'waiting' && myRole === 'p2' && room.p2 !== 'joined') {
                 await fetch('/api/room?action=join', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomId, gameId }) });
             }
         }
 
-        // ⚡ Supabase 实时广播管道
         function connectSupabaseRealtime() {
-            gameChannel = supabaseClient.channel(`vocab-room-${roomId}`);
+            gameChannel = supabaseClient.channel(`vocab-room-${roomId}`, {
+                config: { presence: { key: myRole } }
+            });
 
             gameChannel
                 .on('broadcast', { event: 'p2-ready-status' }, (payload) => {
                     isP2Ready = payload.payload.ready;
                     if (myRole === 'p1') {
                         document.getElementById('start-btn').disabled = !isP2Ready;
-                        document.getElementById('start-btn').innerText = isP2Ready ? '🚀 所有人已就绪，启动比赛！' : '🚀 开始对战 (等待P2准备)';
+                        document.getElementById('start-btn').innerText = isP2Ready ? '所有人已就绪，启动比赛！' : '开始对战 (等待P2准备)';
                     }
                 })
                 .on('broadcast', { event: 'game-start-broadcast' }, (payload) => {
@@ -254,8 +271,22 @@
                     updateStatsUI();
                     checkInstantWinCondition();
                 })
-                .subscribe((status) => {
+                // 🎯 核心追踪：监听对手的 Presence 退出离开事件
+                .on('presence', { event: 'leave' }, ({ leftPresences }) => {
+                    if (!isGameStarted || isGameOver) return;
+                    
+                    // 如果在对局中检测到对方的角色离开了 Presence 管道
+                    const targetOpponent = (myRole === 'p1') ? 'p2' : 'p1';
+                    const hasOpponentLeft = leftPresences.some(p => p.presence_ref && gameChannel.presenceState()[targetOpponent] === undefined);
+                    
+                    if (hasOpponentLeft) {
+                        endGame("OPPONENT_LEFT");
+                    }
+                })
+                .subscribe(async (status) => {
                     if (status === 'SUBSCRIBED') {
+                        // 注册自己的在线状态
+                        await gameChannel.track({ online_at: new Date().toISOString() });
                         setupInitialControlVisibility();
                     }
                 });
@@ -274,63 +305,54 @@
             const btn = document.getElementById('ready-btn');
             const currentReady = btn.innerText.includes('取消');
             if (currentReady) {
-                btn.innerText = '🤝 准备就绪';
+                btn.innerText = '准备就绪';
                 gameChannel.send({ type: 'broadcast', event: 'p2-ready-status', payload: { ready: false } });
             } else {
-                btn.innerText = '✅ 已准备！等待房主开赛';
+                btn.innerText = '已准备！等待房主开赛';
                 gameChannel.send({ type: 'broadcast', event: 'p2-ready-status', payload: { ready: true } });
             }
         }
 
-        // ✨ 形近词辨析高级衍生混淆算法 (完全基于 item.name 进行检索)
         function generateDistractors(targetWord, count = 3) {
             let matches = fullDictionary.filter(item => item.name !== targetWord.name);
             
             matches.forEach(item => {
                 let score = 0;
-                // 1. 前瞻3个字符相似度匹配
                 for(let i = 0; i < 3; i++) {
                     if (targetWord.name[i] && item.name[i] && targetWord.name[i] === item.name[i]) score += 3;
                 }
-                // 2. 单词长度差过滤判定
                 if (Math.abs(targetWord.name.length - item.name.length) <= 2) score += 2;
                 item._tempScore = score;
             });
 
-            // 相似度从大到小权重排序
             matches.sort((a, b) => b._tempScore - a._tempScore);
-            
-            // 抓取前 15 个最形近的词汇缓冲池
             let topPool = matches.slice(0, 15);
             let shuffledPool = topPool.sort(() => 0.5 - Math.random());
             
-            // 返回对应的中文释义 trans[0]
-            return shuffledPool.slice(0, count).map(item => item.trans[0]);
+            // 抓取已经做过前 3 个释义裁剪处理的干扰项
+            return shuffledPool.slice(0, count).map(item => item._cleanTrans);
         }
 
-        // 修正后的房主出题并启动比赛函数
         function hostStartGame() {
             if (fullDictionary.length === 0) return;
             
-            // 🎯 1. 立即禁用启动按钮，并更改文字提示，防止网络延迟时重复点击
             const startBtn = document.getElementById('start-btn');
             if (startBtn) {
                 startBtn.disabled = true;
-                startBtn.innerText = '🚀 正在启动比赛，请稍候...';
+                startBtn.innerText = '正在启动比赛...';
             }
-            
-            // 2. 随机打乱全量词库抽取 30 个
+
             let shuffledDict = [...fullDictionary].sort(() => 0.5 - Math.random());
             let chosen30 = shuffledDict.slice(0, 30);
-        
+
             let finalPayloadWords = chosen30.map(item => {
-                let targetMeaning = item.trans[0];
+                let targetMeaning = item._cleanTrans; // 获取截取后的前3个核心释义
                 let dists = generateDistractors(item, 3);
                 let options = [targetMeaning, ...dists];
                 
                 options.sort(() => 0.5 - Math.random());
                 let correctIdx = options.indexOf(targetMeaning);
-        
+
                 return { 
                     word: item.name, 
                     phone: item.usphone ? `/${item.usphone}/` : (item.ukphone ? `/${item.ukphone}/` : ''), 
@@ -339,21 +361,18 @@
                     answer: correctIdx 
                 };
             });
-        
-            // 云端修改 playing 标志锁住房间，防止其他人再进来
+
             fetch('/api/room?action=click', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomId, gameId, player: 'p1', totalClicks: 1 }) });
-        
-            // 🎯 3. 广播给挑战者 P2（P2 收到后会触发 startLocalGame()）
+
             gameChannel.send({ type: 'broadcast', event: 'game-start-broadcast', payload: { words: finalPayloadWords } });
-        
-            // 🎯 4. 重点：因为 P1 自身收不到上面的广播，所以 P1 在本地直接赋值并切入游戏！
+
             gameWords = finalPayloadWords;
             startLocalGame();
         }
 
-        
         function startLocalGame() {
             isGameOver = false;
+            isGameStarted = true;
             currentIdx = 0;
             p1Correct = 0; p1Total = 0;
             p2Correct = 0; p2Total = 0;
@@ -362,7 +381,7 @@
             document.getElementById('control-panel').style.display = 'none';
             document.getElementById('result-area').style.display = 'none';
             document.getElementById('quiz-area').style.display = 'block';
-            document.getElementById('game-status').innerText = '🟢 比赛进行中！击溃对方！';
+            document.getElementById('game-status').innerText = '比赛进行中！击溃对方！';
 
             updateStatsUI();
             showQuestion();
@@ -380,12 +399,12 @@
         function showQuestion() {
             if (currentIdx >= gameWords.length) {
                 document.getElementById('quiz-area').style.display = 'none';
-                document.getElementById('game-status').innerText = '🏁 你已完成全部答题！等待对局计时归零...';
+                document.getElementById('game-status').innerText = '你已完成全部答题！等待对局倒计时...';
                 return;
             }
             let q = gameWords[currentIdx];
             document.getElementById('current-word').innerText = q.word;
-            document.getElementById('current-phone').innerText = q.phone; // 渲染美音/英音音标
+            document.getElementById('current-phone').innerText = q.phone; 
             
             for(let i=0; i<4; i++) {
                 const btn = document.getElementById(`opt-${i}`);
@@ -403,7 +422,6 @@
             if (myRole === 'p1') { p1Total++; if(isRight) p1Correct++; }
             if (myRole === 'p2') { p2Total++; if(isRight) p2Correct++; }
 
-            // 管道毫秒同步同步器
             gameChannel.send({
                 type: 'broadcast',
                 event: 'score-sync',
@@ -419,7 +437,6 @@
                 currentIdx++;
                 showQuestion();
             } else {
-                // 答错逻辑：进入5秒极速冷却复习层
                 triggerWrongAnswerPenalty(q.meaning);
             }
         }
@@ -460,10 +477,20 @@
             const p1Acc = p1Total === 0 ? 0 : Math.round((p1Correct / p1Total) * 100);
             const p2Acc = p2Total === 0 ? 0 : Math.round((p2Correct / p2Total) * 100);
             
-            document.getElementById('p1-acc').innerText = `${p1Acc}% (${p1Correct}/${p1Total}题)`;
-            document.getElementById('p2-acc').innerText = `${p2Acc}% (${p2Correct}/${p2Total}题)`;
+            document.getElementById('p1-acc').innerText = `${p1Acc}% (${p1Correct}题)`;
+            document.getElementById('p2-acc').innerText = `${p2Acc}% (${p2Correct}题)`;
             
             renderSnakeCircle();
+        }
+
+        // 🎯 核心增强：主动退出房间处理
+        function handleActiveLeave() {
+            if (confirm("确定要退出房间吗？比赛中途退出将直接判定对方获胜！")) {
+                if (gameChannel) {
+                    gameChannel.unsubscribe(); // 注销管道，触发对手的 Presence leave 事件
+                }
+                window.location.href = '/vocab.html';
+            }
         }
 
         function endGame(reason) {
@@ -480,24 +507,27 @@
             let p1Acc = p1Total === 0 ? 0 : (p1Correct / p1Total);
             let p2Acc = p2Total === 0 ? 0 : (p2Correct / p2Total);
 
-            if (reason === "P1_EAT_ALL") {
+            // 根据新规则宣布判定结果
+            if (reason === "OPPONENT_LEFT") {
+                document.getElementById('game-status').innerText = '🏳️ 对方退出了房间';
+                winStatus.innerText = "🏆 对方玩家退出了对局，系统直接判定你获得全胜！";
+            } else if (reason === "P1_EAT_ALL") {
                 winner = 'p1';
                 winStatus.innerText = "🎉 房主 (P1) 的粉龙已将绿龙吞噬殆尽，斩获完胜！";
             } else if (reason === "P2_EAT_ALL") {
                 winner = 'p2';
                 winStatus.innerText = "🎉 挑战者 (P2) 的绿龙已将粉龙吞噬殆尽，斩获完胜！";
             } else if (reason === "TIMEOUT") {
-                document.getElementById('game-status').innerText = '⏰ 时间耗尽！';
-                if (p1Acc > p2Acc) { winner = 'p1'; winStatus.innerText = "⏰ 2分钟时间到！房主 (P1) 的正确率更高，赢得胜利！"; }
-                else if (p2Acc > p1Acc) { winner = 'p2'; winStatus.innerText = "⏰ 2分钟时间到！挑战者 (P2) 的正确率更高，赢得胜利！"; }
-                else { winStatus.innerText = "⏰ 2分钟时间到！双方正确率奇迹持平，握手言和！"; }
+                document.getElementById('game-status').innerText = '时间耗尽！';
+                if (p1Acc > p2Acc) { winner = 'p1'; winStatus.innerText = "2分钟时间到！房主 (P1) 的正确率更高，赢得胜利！"; }
+                else if (p2Acc > p1Acc) { winner = 'p2'; winStatus.innerText = "2分钟时间到！挑战者 (P2) 的正确率更高，赢得胜利！"; }
+                else { winStatus.innerText = "2分钟时间到！双方正确率奇迹持平，握手言和！"; }
             }
 
             document.getElementById('accuracy-report').innerHTML = `
-                <b>房主 P1 终局正确率:</b> ${(p1Acc*100).toFixed(1)}% | <b>挑战者 P2 终局正确率:</b> ${(p2Acc*100).toFixed(1)}%
+                <b>P1 最终正确率:</b> ${(p1Acc*100).toFixed(1)}% | <b>P2 最终正确率:</b> ${(p2Acc*100).toFixed(1)}%
             `;
             
-            // 归档渲染生成错题复盘列表
             const listContainer = document.getElementById('final-word-list');
             listContainer.innerHTML = '';
             gameWords.forEach(w => {
@@ -509,55 +539,62 @@
 
             document.getElementById('control-panel').style.display = 'block';
             if (myRole === 'p1') {
-                document.getElementById('start-btn').innerText = '🔄 开始下一轮比赛 (等待P2准备)';
+                document.getElementById('start-btn').innerText = '开始下一轮比赛 (等待P2准备)';
                 document.getElementById('start-btn').disabled = true;
-                // 云端最终存档解房锁
                 fetch('/api/room?action=click', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomId, gameId, player: 'p1', totalClicks: 30 }) });
             } else if (myRole === 'p2') {
                 const rBtn = document.getElementById('ready-btn');
                 rBtn.style.display = 'block';
-                rBtn.innerText = '🤝 准备再战';
+                rBtn.innerText = '准备再战';
             }
         }
 
-        // 🎨 绘制环状双龙吞噬轨 + 轴心高亮倒计时
+        // 🎯 核心增强：双蛇环状首尾相连，且共同顺时针吃
         function renderSnakeCircle() {
             ctx.clearRect(0,0, canvas.width, canvas.height);
             
             const cx = canvas.width / 2;
             const cy = canvas.height / 2;
             const radius = 110;
-            const thickness = 16;
+            const thickness = 18;
 
+            // 基础总份额为 20。初始各占 10 个份额（即平分秋色各占半圆）
             let p1Segments = 10 + p1Correct - p2Correct;
             p1Segments = Math.max(0, Math.min(20, p1Segments)); 
-            let p1Ratio = p1Segments / 20;
+            
+            let p1Ratio = p1Segments / 20; // P1 所占圆环百分比
+            
+            // 弧度常数：统一以 -Math.PI/2 (即正上方12点钟方向) 作为全局轴心起点
+            const startAngle = -Math.PI / 2;
+            const p1EndAngle = startAngle + (Math.PI * 2 * p1Ratio);
 
-            // 1. P1 弧度线 (粉色炫彩龙身)
+            // 🐍 绘制 P1 粉龙：
+            // 它的尾巴在 12点钟(startAngle)，身体顺时针延伸，头部停留在 p1EndAngle
             if (p1Ratio > 0) {
                 ctx.beginPath();
-                ctx.arc(cx, cy, radius, -Math.PI/2, (-Math.PI/2) + (Math.PI * 2 * p1Ratio));
+                ctx.arc(cx, cy, radius, startAngle, p1EndAngle, false);
                 ctx.strokeStyle = '#ec4899';
                 ctx.lineWidth = thickness;
                 ctx.lineCap = 'round';
-                ctx.shadowBlur = 14; ctx.shadowColor = '#ec4899';
+                ctx.shadowBlur = 12; ctx.shadowColor = '#ec4899';
                 ctx.stroke();
             }
 
-            // 2. P2 弧度线 (绿色炫彩龙身)
+            // 🐍 绘制 P2 绿龙：
+            // 首尾相连！它的尾巴正好连接 P1 的头(p1EndAngle)，身体顺时针延伸，头部冲回 12点钟(startAngle)
             if (p1Ratio < 1) {
                 ctx.beginPath();
-                ctx.arc(cx, cy, radius, (-Math.PI/2) + (Math.PI * 2 * p1Ratio), Math.PI * 1.5);
+                ctx.arc(cx, cy, radius, p1EndAngle, startAngle + (Math.PI * 2), false);
                 ctx.strokeStyle = '#10b981';
                 ctx.lineWidth = thickness;
                 ctx.lineCap = 'round';
-                ctx.shadowBlur = 14; ctx.shadowColor = '#10b981';
+                ctx.shadowBlur = 12; ctx.shadowColor = '#10b981';
                 ctx.stroke();
             }
 
-            ctx.shadowBlur = 0; // 重置阴影发光
+            ctx.shadowBlur = 0; // 重置光效
 
-            // 3. 核心倒计时数字渲染
+            // 轴心高亮显示倒计时
             let mins = Math.floor(timeLeft / 60);
             let secs = timeLeft % 60;
             let timeStr = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
