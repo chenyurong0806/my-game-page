@@ -44,7 +44,7 @@ export async function onRequest(context) {
         };
         
         // 房间基础状态写入 KV（1小时后自动过期释放空间）
-        await env.GAME_KV.put(metaKey, JSON.stringify(meta), { expirationTtl: 3600 });
+        await env.GAME_KV.put(metaKey, JSON.stringify(meta), { expirationTtl: 1200 });
 
         return new Response(JSON.stringify({ roomId: randomRoomId }), { headers });
     }
@@ -61,7 +61,7 @@ export async function onRequest(context) {
         if (meta.status === 'waiting') {
             meta.p2 = 'joined';
             meta.status = 'playing'; 
-            await env.GAME_KV.put(metaKey, JSON.stringify(meta), { expirationTtl: 3600 });
+            await env.GAME_KV.put(metaKey, JSON.stringify(meta), { expirationTtl: 1200 });
         }
         return new Response(JSON.stringify(meta), { headers });
     }
