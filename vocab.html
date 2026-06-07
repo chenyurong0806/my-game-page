@@ -308,13 +308,21 @@
             return shuffledPool.slice(0, count).map(item => item.trans[0]);
         }
 
-        // 主机出题并飞速广播
+        // 修正后的房主出题并启动比赛函数
         function hostStartGame() {
             if (fullDictionary.length === 0) return;
             
+            // 🎯 1. 立即禁用启动按钮，并更改文字提示，防止网络延迟时重复点击
+            const startBtn = document.getElementById('start-btn');
+            if (startBtn) {
+                startBtn.disabled = true;
+                startBtn.innerText = '🚀 正在启动比赛，请稍候...';
+            }
+            
+            // 2. 随机打乱全量词库抽取 30 个
             let shuffledDict = [...fullDictionary].sort(() => 0.5 - Math.random());
             let chosen30 = shuffledDict.slice(0, 30);
-
+        
             let finalPayloadWords = chosen30.map(item => {
                 let targetMeaning = item.trans[0];
                 let dists = generateDistractors(item, 3);
@@ -322,7 +330,7 @@
                 
                 options.sort(() => 0.5 - Math.random());
                 let correctIdx = options.indexOf(targetMeaning);
-
+        
                 return { 
                     word: item.name, 
                     phone: item.usphone ? `/${item.usphone}/` : (item.ukphone ? `/${item.ukphone}/` : ''), 
@@ -331,6 +339,17 @@
                     answer: correctIdx 
                 };
             });
+        
+            // 云端修改 playing 标志锁住房间，防止其他人再进来
+            fetch('/api/room?action=click', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomId, gameId, player: 'p1', totalClicks: 1 }) });
+        
+            // 🎯 3. 广播给挑战者 P2（P2 收到后会触发 startLocalGame()）
+            gameChannel.send({ type: 'broadcast', event: 'game-start-broadcast', payload: { words: finalPayloadWords } });
+        
+            // 🎯 4. 重点：因为 P1 自身收不到上面的广播，所以 P1 在本地直接赋值并切入游戏！
+            gameWords = finalPayloadWords;
+            startLocalGame();
+        }
 
             // 云端修改playing标志锁住房间
             fetch('/api/room?action=click', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomId, gameId, player: 'p1', totalClicks: 1 }) });
