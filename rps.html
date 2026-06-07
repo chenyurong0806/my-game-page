@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>✌️ 剪刀石头布联机对战</title>
+    <title>✌️ 剪刀石头布（Supabase 毫秒级对战版）</title>
     <style>
         :root { --bg-color: #0f172a; --card-bg: #1e293b; --text-main: #f8fafc; --text-muted: #94a3b8; --primary: #3b82f6; }
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -19,6 +19,7 @@
         #game-status { text-align: center; font-size: 1.2rem; font-weight: bold; margin: 20px 0; color: #f59e0b; }
         .badge { padding: 4px 8px; font-size: 0.75rem; font-weight: bold; border-radius: 6px; background: #334155;}
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
     <div class="container">
@@ -26,7 +27,7 @@
             <button class="btn-secondary" onclick="window.location.href='/'">← 返回主页</button>
             <div class="card">
                 <h2>✌️ 剪刀石头布大赛</h2>
-                <p>心理大博弈！选择你的出拳，等待对手出拳后揭晓胜负！</p>
+                <p>⚡ 接入 Supabase Realtime：不再需要傻傻轮询，出拳瞬间送达对手屏幕！</p>
             </div>
             <div class="card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
@@ -43,7 +44,7 @@
                 <h2 id="game-title">游戏房间</h2>
                 <span id="player-identity" class="badge"></span>
                 
-                <div id="game-status">等待对局开始...</div>
+                <div id="game-status">正在建立连接...</div>
 
                 <div style="display: flex; justify-content: space-between; margin-top: 20px;">
                     <button class="choice-btn" id="btn-1" onclick="makeChoice(1)" disabled>✊</button>
@@ -60,15 +61,23 @@
     </div>
 
     <script>
-        const gameId = 'rps'; // 标记当前游戏为剪刀石头布
-        let pollingInterval = null;
+        // ⚡ 请把这里替换为你真实的 Supabase 项目 API 凭证
+        const SUPABASE_URL = 'https://mamubvgmcetepllznifl.supabase.co'; 
+        const SUPABASE_ANON_KEY = 'sb_publishable_HEeNPSqD75cWlnmZjcVHKA_Pw-OdL_A';
+
+        // 初始化 Supabase 客户端
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        const gameId = 'rps';
         let myRole = null;
-        let hasChosen = false;
+        let gameChannel = null; // 用于存放实时通信管道
+
+        // 记录游戏局内本地变量
+        let p1Choice = 0;
+        let p2Choice = 0;
 
         const urlParams = new URLSearchParams(window.location.search);
         const roomId = urlParams.get('roomId');
-
-        // 1=石头, 2=剪刀, 3=布 的映射文本
         const choiceMap = { 0: '未出拳', 1: '✊ 石头', 2: '✌️ 剪刀', 3: '✋ 布' };
 
         async function init() {
@@ -80,12 +89,15 @@
                 document.getElementById('game-title').innerText = `房间 #${roomId}`;
                 myRole = localStorage.getItem(`room_${roomId}_role`);
                 
-                pollRoomStatus();
-                pollingInterval = setInterval(pollRoomStatus, 1000);
+                // 1. 先通过 Cloudflare 后端建立并同步房间基础状态
+                await syncBaseRoomStatus();
+
+                // 2. ✨ 核心亮点：连接 Supabase 管道并监听
+                connectSupabaseRealtime();
             }
         }
 
-        // 获取房间列表
+        // 依旧利用原有后端获取活跃房间
         async function fetchRooms() {
             const ul = document.getElementById('room-list');
             ul.innerHTML = '<p style="text-align:center;">正在探测房间...</p>';
@@ -103,7 +115,7 @@
             });
         }
 
-        // 创建房间
+        // 依旧利用原有后端创建房间
         async function createRoom() {
             const res = await fetch('/api/room?action=create', {
                 method: 'POST',
@@ -115,8 +127,8 @@
             window.location.href = `?roomId=${data.roomId}`;
         }
 
-        // 定时轮询房间状态
-        async function pollRoomStatus() {
+        // 用原接口确定玩家身份并处理 P2 加入房间
+        async function syncBaseRoomStatus() {
             const res = await fetch(`/api/room?action=status&roomId=${roomId}&gameId=${gameId}&_t=${Date.now()}`);
             if (res.status === 404) { alert('房间已解散'); window.location.href = '/rps.html'; return; }
             const room = await res.json();
@@ -129,67 +141,90 @@
             }
 
             document.getElementById('player-identity').innerText = { 'p1': '⚡ 房主 (P1)', 'p2': '🎯 挑战者 (P2)', 'audience': '👁️ 观众' }[myRole];
+            
+            if (room.status === 'waiting' && myRole === 'p2' && room.p2 !== 'joined') {
+                await fetch('/api/room?action=join', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ roomId, gameId })
+                });
+            }
+        }
 
-            const s1 = room.p1Score || 0; // P1的选择
-            const s2 = room.p2Score || 0; // P2的选择
+        // ⚡ 建立 Supabase 实时专属信道
+        function connectSupabaseRealtime() {
+            // 给当前房间创建一条专属的通信管道 (用房间ID命名)
+            gameChannel = supabaseClient.channel(`game-room-${roomId}`);
 
-            const statusText = document.getElementById('game-status');
+            // 监听这条管道内所有人广播的 "player-move" 事件
+            gameChannel
+                .on('broadcast', { event: 'player-move' }, (payload) => {
+                    const data = payload.payload;
+                    console.log("⚡ 毫秒级收到广播数据:", data);
 
-            if (room.status === 'waiting') {
-                statusText.innerText = '⏳ 等待挑战者进入房间...';
-                if (myRole === 'p2' && room.p2 !== 'joined') {
-                    await fetch('/api/room?action=join', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ roomId, gameId })
-                    });
-                }
-            } else if (room.status === 'playing') {
-                statusText.innerText = '🎴 请出拳！';
-                
-                // 激活出拳按钮
-                if (!hasChosen && (myRole === 'p1' || myRole === 'p2')) {
-                    document.getElementById('btn-1').disabled = false;
-                    document.getElementById('btn-2').disabled = false;
-                    document.getElementById('btn-3').disabled = false;
-                }
+                    // 收到数据后更新网页上的分数状态
+                    if (data.player === 'p1') p1Choice = data.choice;
+                    if (data.player === 'p2') p2Choice = data.choice;
 
-                // 显示谁已经准备好了（隐藏具体拳型以防作弊）
-                document.getElementById('p1-state').innerText = `房主 (P1)：${s1 > 0 ? '👍 已出拳' : '⏳ 思考中'}`;
-                document.getElementById('p2-state').innerText = `挑战者 (P2)：${s2 > 0 ? '👍 已出拳' : '⏳ 思考中'}`;
-
-                // 如果双方都出拳了，前端直接判定胜负，并展示结果
-                if (s1 > 0 && s2 > 0) {
-                    clearInterval(pollingInterval); // 停止刷新
-                    document.getElementById('p1-state').innerText = `房主 (P1) 出了：${choiceMap[s1]}`;
-                    document.getElementById('p2-state').innerText = `挑战者 (P2) 出了：${choiceMap[s2]}`;
-                    
-                    // 判定算法
-                    if (s1 === s2) {
-                        statusText.innerText = '🤝 竟然平局了！';
-                    } else if ((s1 === 1 && s2 === 2) || (s1 === 2 && s2 === 3) || (s1 === 3 && s2 === 1)) {
-                        statusText.innerText = '🎉 房主 (P1) 获胜！';
-                    } else {
-                        statusText.innerText = '🎉 挑战者 (P2) 获胜！';
+                    // 刷新画面
+                    renderGameUI();
+                })
+                .subscribe((status) => {
+                    if (status === 'SUBSCRIBED') {
+                        document.getElementById('game-status').innerText = '🎴 实时信道连通！请出拳...';
+                        // 连通成功后，且自己不是观众，则允许按键
+                        if (myRole === 'p1' || myRole === 'p2') {
+                            enableButtons(true);
+                        }
                     }
+                });
+        }
+
+        // 刷新对战页面的判定结果
+        function renderGameUI() {
+            const statusText = document.getElementById('game-status');
+            
+            // 盲盒渲染：如果你出了，对手没出，只显示“已出拳”，不能透视答案
+            document.getElementById('p1-state').innerText = `房主 (P1)：${p1Choice > 0 ? (p2Choice > 0 ? choiceMap[p1Choice] : '👍 已出拳') : '⏳ 思考中'}`;
+            document.getElementById('p2-state').innerText = `挑战者 (P2)：${p2Choice > 0 ? (p1Choice > 0 ? choiceMap[p2Choice] : '👍 已出拳') : '⏳ 思考中'}`;
+
+            // 当两个人都通过 Supabase 管道发了数据后，前端直接零延迟裁决
+            if (p1Choice > 0 && p2Choice > 0) {
+                enableButtons(false);
+                if (p1Choice === p2Choice) {
+                    statusText.innerText = '🤝 竟然平局了！';
+                } else if ((p1Choice === 1 && p2Choice === 2) || (p1Choice === 2 && p2Choice === 3) || (p1Choice === 3 && p2Choice === 1)) {
+                    statusText.innerText = '🎉 房主 (P1) 获胜！';
+                } else {
+                    statusText.innerText = '🎉 挑战者 (P2) 获胜！';
                 }
             }
         }
 
         // 玩家点击出拳
-        async function makeChoice(value) {
-            hasChosen = true;
-            // 禁用按钮，防止重复点击
-            document.getElementById('btn-1').disabled = true;
-            document.getElementById('btn-2').disabled = true;
-            document.getElementById('btn-3').disabled = true;
+        function makeChoice(value) {
+            if (myRole !== 'p1' && myRole !== 'p2') return;
 
-            // 借用 click 后端接口，把选择存入数据库
-            await fetch('/api/room?action=click', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ roomId, gameId, player: myRole, totalClicks: value })
+            // 本地更新自己的状态
+            if (myRole === 'p1') p1Choice = value;
+            if (myRole === 'p2') p2Choice = value;
+
+            // 先刷新一次本地画面
+            renderGameUI();
+            enableButtons(false);
+
+            // ⚡ 核心魔法：把自己的出拳通过管道瞬间发给对方！
+            gameChannel.send({
+                type: 'broadcast',
+                event: 'player-move',
+                payload: { player: myRole, choice: value }
             });
+        }
+
+        function enableButtons(bool) {
+            document.getElementById('btn-1').disabled = !bool;
+            document.getElementById('btn-2').disabled = !bool;
+            document.getElementById('btn-3').disabled = !bool;
         }
 
         init();

@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🐉 单词吞噬战 | 双人实时词汇PK</title>
+    <style>
+        :root { --bg-color: #090d16; --card-bg: #151f32; --text-main: #f8fafc; --text-muted: #64748b; --primary: #3b82f6; --p1-color: #ec4899; --p2-color: #10b981; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: sans-serif; background-color: var(--bg-color); color: var(--text-main); padding: 20px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+        .container { width: 100%; max-width: 1100px; }
+        .view { display: none; }
+        .view.active { display: block; }
+        .card { background: var(--card-bg); border: 1px solid #22324d; border-radius: 16px; padding: 24px; margin-bottom: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+        button { padding: 12px 24px; color: white; background: linear-gradient(135deg, #3b82f6, #2563eb); border: none; border-radius: 12px; cursor: pointer; font-weight: bold; }
+        button:disabled { background: #1e293b; color: #475569; cursor: not-allowed; }
+        .btn-secondary { background: #22324d; margin-bottom: 20px; }
+        .room-item { display: flex; justify-content: space-between; align-items: center; padding: 14px; background: #0f172a; border-radius: 10px; margin-top: 10px; }
+        .badge { padding: 4px 8px; font-size: 0.75rem; font-weight: bold; border-radius: 6px; background: #22324d; display: inline-block; }
+
+        /* ✨ 对战双栏布局 */
+        .game-grid { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 24px; margin-top: 10px; }
+        
+        /* 左栏：答题区 */
+        .quiz-panel { display: flex; flex-direction: column; justify-content: center; min-height: 420px; position: relative; }
+        .word-display { font-size: 2.6rem; font-weight: bold; text-align: center; margin-bottom: 5px; letter-spacing: 1px; color: #f1f5f9; }
+        .phone-display { font-size: 1.1rem; color: #64748b; text-align: center; margin-bottom: 30px; font-family: sans-serif; }
+        .options-grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+        .option-btn { width: 100%; padding: 16px; text-align: left; font-size: 1.1rem; background: #1e293b; border: 1px solid #334155; color: #cbd5e1; border-radius: 12px; transition: all 0.15s ease; }
+        .option-btn:not(:disabled):hover { background: #2d3748; border-color: var(--primary); transform: translateX(4px); }
+        
+        /* 惩罚与锁定冷却层 */
+        .cooldown-overlay { display: none; position: absolute; top:0; left:0; width:100%; height:100%; background: rgba(9,13,22,0.95); border-radius:16px; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding: 20px; z-index: 10; }
+        .cooldown-overlay.active { display: flex; }
+        .correct-ans-tip { font-size: 1.4rem; color: #ef4444; font-weight: bold; margin-bottom: 10px; }
+        .meaning-tip { font-size: 1.2rem; color: #94a3b8; margin-bottom: 20px; max-width: 80%; line-height: 1.5; }
+        .cooldown-timer { font-size: 2.5rem; color: #f59e0b; font-weight: bold; }
+
+        /* 右栏：小蛇环形进度条区 */
+        .snake-panel { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        #canvas-container { position: relative; width: 300px; height: 300px; margin-bottom: 15px; }
+        canvas { background: transparent; }
+        
+        /* 游戏结果结算单词表 */
+        .word-list-results { max-height: 280px; overflow-y: auto; margin-top: 15px; padding-right: 5px; border: 1px solid #1e293b; border-radius: 8px; }
+        .word-row { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #1e293b; font-size: 0.95rem; }
+        .word-row:last-child { border-bottom: none; }
+        .word-row:nth-child(even) { background: #111c2e; }
+
+        #game-status { text-align: center; font-size: 1.2rem; font-weight: bold; margin: 10px 0; color: #f59e0b; }
+        .sync-stats { width:100%; display: flex; justify-content: space-between; font-size: 0.9rem; color: var(--text-muted); margin-bottom: 10px;}
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+    <div class="container">
+        <div id="view-lobby" class="view">
+            <button class="btn-secondary" onclick="window.location.href='/'">← 返回主页</button>
+            <div class="card">
+                <h2>🐉 单词吞噬战 (Vocabulary Duel)</h2>
+                <p>看英文选中文！每答对一题，你的环状巨龙就会拉长并咬掉对方一段尾巴！答错将被冰冻锁定 5 秒并强显正确释义复习。</p>
+            </div>
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3>🏠 活跃房间</h3>
+                    <button onclick="createRoom()">+ 创建房间</button>
+                </div>
+                <ul id="room-list"></ul>
+            </div>
+        </div>
+
+        <div id="view-game" class="view">
+            <button class="btn-secondary" onclick="window.location.href='/vocab.html'">← 退出房间</button>
+            
+            <div class="game-grid">
+                <div class="card quiz-panel" id="quiz-card">
+                    <div id="game-status">正在建立连接...</div>
+                    
+                    <div id="quiz-area" style="display: none;">
+                        <div class="word-display" id="current-word">loading...</div>
+                        <div class="phone-display" id="current-phone"></div>
+                        <div class="options-grid">
+                            <button class="option-btn" id="opt-0" onclick="submitAnswer(0)"></button>
+                            <button class="option-btn" id="opt-1" onclick="submitAnswer(1)"></button>
+                            <button class="option-btn" id="opt-2" onclick="submitAnswer(2)"></button>
+                            <button class="option-btn" id="opt-3" onclick="submitAnswer(3)"></button>
+                        </div>
+                    </div>
+
+                    <div class="cooldown-overlay" id="cooldown-layer">
+                        <div class="correct-ans-tip">❌ 记错啦！吸取教训</div>
+                        <div class="meaning-tip" id="correct-meaning-tip">正确释义</div>
+                        <div class="cooldown-timer" id="cooldown-countdown">5</div>
+                    </div>
+
+                    <div id="result-area" style="display: none;">
+                        <h3 id="win-status" style="font-size:1.4rem; margin-bottom:10px; color:#f59e0b; text-align:center;"></h3>
+                        <div id="accuracy-report" style="text-align:center; margin-bottom:15px; color:#94a3b8;"></div>
+                        <h4>📋 本局考察的 30 个高考词汇：</h4>
+                        <div class="word-list-results" id="final-word-list"></div>
+                    </div>
+                </div>
+
+                <div class="card snake-panel">
+                    <span id="player-identity" class="badge"></span>
+                    <div style="margin-top: 15px; width:100%;">
+                        <div class="sync-stats">
+                            <span style="color:var(--p1-color)">P1 正确率: <span id="p1-acc">0%</span></span>
+                            <span style="color:var(--p2-color)">P2 正确率: <span id="p2-acc">0%</span></span>
+                        </div>
+                    </div>
+                    
+                    <div id="canvas-container">
+                        <canvas id="snakeCanvas" width="300" height="300"></canvas>
+                    </div>
+
+                    <div id="control-panel" style="margin-top: 10px; text-align: center; width:100%;">
+                        <button id="ready-btn" style="width:100%; display:none;" onclick="clickReady()">🤝 准备就绪</button>
+                        <button id="start-btn" style="width:100%; display:none;" onclick="hostStartGame()" disabled>🚀 开始对战 (等待P2准备)</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ⚡ 请填入你的真实 Supabase 凭证
+        const SUPABASE_URL = 'YOUR_SUPABASE_URL'; 
+        const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const gameId = 'vocab-duel';
+
+        let myRole = null;
+        let gameChannel = null;
+        let fullDictionary = []; // 全量词库容器
+        let gameWords = [];      // 核心发牌包（包含当前局选中的30个词和混淆项）
+
+        // 对战动态计分板
+        let currentIdx = 0;
+        let p1Correct = 0, p1Total = 0;
+        let p2Correct = 0, p2Total = 0;
+        
+        let timeLeft = 120; // 120秒倒计时
+        let timerInterval = null;
+        let isP2Ready = false;
+        let isGameOver = false;
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const roomId = urlParams.get('roomId');
+
+        const canvas = document.getElementById('snakeCanvas');
+        const ctx = canvas.getContext('2d');
+
+        async function init() {
+            if (!roomId) {
+                document.getElementById('view-lobby').classList.add('active');
+                fetchRooms();
+            } else {
+                document.getElementById('view-game').classList.add('active');
+                document.getElementById('game-title').innerText = `房间 #${roomId}`;
+                myRole = localStorage.getItem(`room_${roomId}_role`);
+                
+                await syncBaseRoomStatus();
+                await loadVocabulary(); // 🎯 加载并初始化词汇
+
+                if (SUPABASE_URL === 'YOUR_SUPABASE_URL') {
+                    document.getElementById('game-status').innerText = '❌ 未配置 Supabase 密钥';
+                    return;
+                }
+                
+                connectSupabaseRealtime();
+                renderSnakeCircle();
+            }
+        }
+
+        // 🎯 深度适配用户的新词典 schema 格式
+        async function loadVocabulary() {
+            try {
+                const res = await fetch('/GaoKao_3500.json');
+                const rawData = await res.json();
+                
+                // 进行格式防空清洗，确保格式强健
+                fullDictionary = rawData.filter(item => item && item.name && item.trans && item.trans.length > 0);
+            } catch (e) {
+                console.error("词库文件加载失败，请确保 /GaoKao_3500.json 放置正确", e);
+                document.getElementById('game-status').innerText = '❌ 词库加载失败，请检查路径';
+            }
+        }
+
+        // 底座同步与大厅获取
+        async function fetchRooms() {
+            const ul = document.getElementById('room-list');
+            ul.innerHTML = '<p style="text-align:center;">正在检索时空单词房间...</p>';
+            const res = await fetch(`/api/room?action=list&gameId=${gameId}&_t=${Date.now()}`);
+            const rooms = await res.json();
+            ul.innerHTML = rooms.length === 0 ? '<p style="text-align:center; color:#64748b;">暂无房间，快去创建一个吧！</p>' : '';
+            rooms.forEach(r => {
+                const li = document.createElement('li');
+                li.className = 'room-item';
+                li.innerHTML = `<div><strong>房间 #${r.id}</strong></div><button style="padding:6px 14px;" onclick="window.location.href='?roomId=${r.id}'" ${r.status !== 'waiting'?'disabled':''}>进入对决</button>`;
+                ul.appendChild(li);
+            });
+        }
+
+        async function createRoom() {
+            const res = await fetch('/api/room?action=create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameId }) });
+            const data = await res.json();
+            localStorage.setItem(`room_${data.roomId}_role`, 'p1');
+            window.location.href = `?roomId=${data.roomId}`;
+        }
+
+        async function syncBaseRoomStatus() {
+            const res = await fetch(`/api/room?action=status&roomId=${roomId}&gameId=${gameId}&_t=${Date.now()}`);
+            if (res.status === 404) { alert('房间不存在'); window.location.href = '/vocab.html'; return; }
+            const room = await res.json();
+
+            if (!myRole) {
+                if (!room.p1) myRole = 'p1';
+                else if (!room.p2) myRole = 'p2';
+                else myRole = 'audience';
+                localStorage.setItem(`room_${roomId}_role`, myRole);
+            }
+            document.getElementById('player-identity').innerText = { 'p1': '⚡ 房主 (P1) · 粉龙', 'p2': '🎯 挑战者 (P2) · 绿龙', 'audience': '👁️ 观众' }[myRole];
+            
+            if (room.status === 'waiting' && myRole === 'p2' && room.p2 !== 'joined') {
+                await fetch('/api/room?action=join', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomId, gameId }) });
+            }
+        }
+
+        // ⚡ Supabase 实时广播管道
+        function connectSupabaseRealtime() {
+            gameChannel = supabaseClient.channel(`vocab-room-${roomId}`);
+
+            gameChannel
+                .on('broadcast', { event: 'p2-ready-status' }, (payload) => {
+                    isP2Ready = payload.payload.ready;
+                    if (myRole === 'p1') {
+                        document.getElementById('start-btn').disabled = !isP2Ready;
+                        document.getElementById('start-btn').innerText = isP2Ready ? '🚀 所有人已就绪，启动比赛！' : '🚀 开始对战 (等待P2准备)';
+                    }
+                })
+                .on('broadcast', { event: 'game-start-broadcast' }, (payload) => {
+                    gameWords = payload.payload.words;
+                    startLocalGame();
+                })
+                .on('broadcast', { event: 'score-sync' }, (payload) => {
+                    const data = payload.payload;
+                    if (data.player === 'p1') { p1Correct = data.correct; p1Total = data.total; }
+                    if (data.player === 'p2') { p2Correct = data.correct; p2Total = data.total; }
+                    
+                    updateStatsUI();
+                    checkInstantWinCondition();
+                })
+                .subscribe((status) => {
+                    if (status === 'SUBSCRIBED') {
+                        setupInitialControlVisibility();
+                    }
+                });
+        }
+
+        function setupInitialControlVisibility() {
+            document.getElementById('game-status').innerText = '⏳ 等待玩家就绪...';
+            if (myRole === 'p1') {
+                document.getElementById('start-btn').style.display = 'block';
+            } else if (myRole === 'p2') {
+                document.getElementById('ready-btn').style.display = 'block';
+            }
+        }
+
+        function clickReady() {
+            const btn = document.getElementById('ready-btn');
+            const currentReady = btn.innerText.includes('取消');
+            if (currentReady) {
+                btn.innerText = '🤝 准备就绪';
+                gameChannel.send({ type: 'broadcast', event: 'p2-ready-status', payload: { ready: false } });
+            } else {
+                btn.innerText = '✅ 已准备！等待房主开赛';
+                gameChannel.send({ type: 'broadcast', event: 'p2-ready-status', payload: { ready: true } });
+            }
+        }
+
+        // ✨ 形近词辨析高级衍生混淆算法 (完全基于 item.name 进行检索)
+        function generateDistractors(targetWord, count = 3) {
+            let matches = fullDictionary.filter(item => item.name !== targetWord.name);
+            
+            matches.forEach(item => {
+                let score = 0;
+                // 1. 前瞻3个字符相似度匹配
+                for(let i = 0; i < 3; i++) {
+                    if (targetWord.name[i] && item.name[i] && targetWord.name[i] === item.name[i]) score += 3;
+                }
+                // 2. 单词长度差过滤判定
+                if (Math.abs(targetWord.name.length - item.name.length) <= 2) score += 2;
+                item._tempScore = score;
+            });
+
+            // 相似度从大到小权重排序
+            matches.sort((a, b) => b._tempScore - a._tempScore);
+            
+            // 抓取前 15 个最形近的词汇缓冲池
+            let topPool = matches.slice(0, 15);
+            let shuffledPool = topPool.sort(() => 0.5 - Math.random());
+            
+            // 返回对应的中文释义 trans[0]
+            return shuffledPool.slice(0, count).map(item => item.trans[0]);
+        }
+
+        // 主机出题并飞速广播
+        function hostStartGame() {
+            if (fullDictionary.length === 0) return;
+            
+            let shuffledDict = [...fullDictionary].sort(() => 0.5 - Math.random());
+            let chosen30 = shuffledDict.slice(0, 30);
+
+            let finalPayloadWords = chosen30.map(item => {
+                let targetMeaning = item.trans[0];
+                let dists = generateDistractors(item, 3);
+                let options = [targetMeaning, ...dists];
+                
+                options.sort(() => 0.5 - Math.random());
+                let correctIdx = options.indexOf(targetMeaning);
+
+                return { 
+                    word: item.name, 
+                    phone: item.usphone ? `/${item.usphone}/` : (item.ukphone ? `/${item.ukphone}/` : ''), 
+                    meaning: targetMeaning, 
+                    options: options, 
+                    answer: correctIdx 
+                };
+            });
+
+            // 云端修改playing标志锁住房间
+            fetch('/api/room?action=click', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomId, gameId, player: 'p1', totalClicks: 1 }) });
+
+            // 广播
+            gameChannel.send({ type: 'broadcast', event: 'game-start-broadcast', payload: { words: finalPayloadWords } });
+        }
+
+        function startLocalGame() {
+            isGameOver = false;
+            currentIdx = 0;
+            p1Correct = 0; p1Total = 0;
+            p2Correct = 0; p2Total = 0;
+            timeLeft = 120;
+
+            document.getElementById('control-panel').style.display = 'none';
+            document.getElementById('result-area').style.display = 'none';
+            document.getElementById('quiz-area').style.display = 'block';
+            document.getElementById('game-status').innerText = '🟢 比赛进行中！击溃对方！';
+
+            updateStatsUI();
+            showQuestion();
+
+            clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                timeLeft--;
+                renderSnakeCircle();
+                if (timeLeft <= 0) {
+                    endGame("TIMEOUT");
+                }
+            }, 1000);
+        }
+
+        function showQuestion() {
+            if (currentIdx >= gameWords.length) {
+                document.getElementById('quiz-area').style.display = 'none';
+                document.getElementById('game-status').innerText = '🏁 你已完成全部答题！等待对局计时归零...';
+                return;
+            }
+            let q = gameWords[currentIdx];
+            document.getElementById('current-word').innerText = q.word;
+            document.getElementById('current-phone').innerText = q.phone; // 渲染美音/英音音标
+            
+            for(let i=0; i<4; i++) {
+                const btn = document.getElementById(`opt-${i}`);
+                btn.innerText = q.options[i];
+                btn.disabled = false;
+            }
+        }
+
+        function submitAnswer(idx) {
+            let q = gameWords[currentIdx];
+            let isRight = (idx === q.answer);
+            
+            for(let i=0; i<4; i++) document.getElementById(`opt-${i}`).disabled = true;
+
+            if (myRole === 'p1') { p1Total++; if(isRight) p1Correct++; }
+            if (myRole === 'p2') { p2Total++; if(isRight) p2Correct++; }
+
+            // 管道毫秒同步同步器
+            gameChannel.send({
+                type: 'broadcast',
+                event: 'score-sync',
+                payload: { player: myRole, correct: (myRole==='p1'?p1Correct:p2Correct), total: (myRole==='p1'?p1Total:p2Total) }
+            });
+
+            updateStatsUI();
+            checkInstantWinCondition();
+
+            if (isGameOver) return;
+
+            if (isRight) {
+                currentIdx++;
+                showQuestion();
+            } else {
+                // 答错逻辑：进入5秒极速冷却复习层
+                triggerWrongAnswerPenalty(q.meaning);
+            }
+        }
+
+        function triggerWrongAnswerPenalty(correctMeaning) {
+            const layer = document.getElementById('cooldown-layer');
+            const countdownText = document.getElementById('cooldown-countdown');
+            document.getElementById('correct-meaning-tip').innerText = `正确答案是：${correctMeaning}`;
+            
+            let count = 5;
+            countdownText.innerText = count;
+            layer.classList.add('active');
+
+            let penaltyInterval = setInterval(() => {
+                count--;
+                countdownText.innerText = count;
+                if(count <= 0) {
+                    clearInterval(penaltyInterval);
+                    layer.classList.remove('active');
+                    currentIdx++; 
+                    showQuestion();
+                }
+            }, 1000);
+        }
+
+        function checkInstantWinCondition() {
+            if (isGameOver) return;
+            
+            let p1Segments = 10 + p1Correct - p2Correct;
+            if (p1Segments >= 20) {
+                endGame("P1_EAT_ALL");
+            } else if (p1Segments <= 0) {
+                endGame("P2_EAT_ALL");
+            }
+        }
+
+        function updateStatsUI() {
+            const p1Acc = p1Total === 0 ? 0 : Math.round((p1Correct / p1Total) * 100);
+            const p2Acc = p2Total === 0 ? 0 : Math.round((p2Correct / p2Total) * 100);
+            
+            document.getElementById('p1-acc').innerText = `${p1Acc}% (${p1Correct}/${p1Total}题)`;
+            document.getElementById('p2-acc').innerText = `${p2Acc}% (${p2Correct}/${p2Total}题)`;
+            
+            renderSnakeCircle();
+        }
+
+        function endGame(reason) {
+            isGameOver = true;
+            clearInterval(timerInterval);
+            
+            document.getElementById('quiz-area').style.display = 'none';
+            document.getElementById('cooldown-layer').classList.remove('active');
+            const resultArea = document.getElementById('result-area');
+            const winStatus = document.getElementById('win-status');
+            resultArea.style.display = 'block';
+
+            let winner = null;
+            let p1Acc = p1Total === 0 ? 0 : (p1Correct / p1Total);
+            let p2Acc = p2Total === 0 ? 0 : (p2Correct / p2Total);
+
+            if (reason === "P1_EAT_ALL") {
+                winner = 'p1';
+                winStatus.innerText = "🎉 房主 (P1) 的粉龙已将绿龙吞噬殆尽，斩获完胜！";
+            } else if (reason === "P2_EAT_ALL") {
+                winner = 'p2';
+                winStatus.innerText = "🎉 挑战者 (P2) 的绿龙已将粉龙吞噬殆尽，斩获完胜！";
+            } else if (reason === "TIMEOUT") {
+                document.getElementById('game-status').innerText = '⏰ 时间耗尽！';
+                if (p1Acc > p2Acc) { winner = 'p1'; winStatus.innerText = "⏰ 2分钟时间到！房主 (P1) 的正确率更高，赢得胜利！"; }
+                else if (p2Acc > p1Acc) { winner = 'p2'; winStatus.innerText = "⏰ 2分钟时间到！挑战者 (P2) 的正确率更高，赢得胜利！"; }
+                else { winStatus.innerText = "⏰ 2分钟时间到！双方正确率奇迹持平，握手言和！"; }
+            }
+
+            document.getElementById('accuracy-report').innerHTML = `
+                <b>房主 P1 终局正确率:</b> ${(p1Acc*100).toFixed(1)}% | <b>挑战者 P2 终局正确率:</b> ${(p2Acc*100).toFixed(1)}%
+            `;
+            
+            // 归档渲染生成错题复盘列表
+            const listContainer = document.getElementById('final-word-list');
+            listContainer.innerHTML = '';
+            gameWords.forEach(w => {
+                let div = document.createElement('div');
+                div.className = 'word-row';
+                div.innerHTML = `<strong>${w.word} <span style="font-weight:normal;color:#475569;font-size:0.85rem;">${w.phone}</span></strong> <span style="color:#94a3b8">${w.meaning}</span>`;
+                listContainer.appendChild(div);
+            });
+
+            document.getElementById('control-panel').style.display = 'block';
+            if (myRole === 'p1') {
+                document.getElementById('start-btn').innerText = '🔄 开始下一轮比赛 (等待P2准备)';
+                document.getElementById('start-btn').disabled = true;
+                // 云端最终存档解房锁
+                fetch('/api/room?action=click', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomId, gameId, player: 'p1', totalClicks: 30 }) });
+            } else if (myRole === 'p2') {
+                const rBtn = document.getElementById('ready-btn');
+                rBtn.style.display = 'block';
+                rBtn.innerText = '🤝 准备再战';
+            }
+        }
+
+        // 🎨 绘制环状双龙吞噬轨 + 轴心高亮倒计时
+        function renderSnakeCircle() {
+            ctx.clearRect(0,0, canvas.width, canvas.height);
+            
+            const cx = canvas.width / 2;
+            const cy = canvas.height / 2;
+            const radius = 110;
+            const thickness = 16;
+
+            let p1Segments = 10 + p1Correct - p2Correct;
+            p1Segments = Math.max(0, Math.min(20, p1Segments)); 
+            let p1Ratio = p1Segments / 20;
+
+            // 1. P1 弧度线 (粉色炫彩龙身)
+            if (p1Ratio > 0) {
+                ctx.beginPath();
+                ctx.arc(cx, cy, radius, -Math.PI/2, (-Math.PI/2) + (Math.PI * 2 * p1Ratio));
+                ctx.strokeStyle = '#ec4899';
+                ctx.lineWidth = thickness;
+                ctx.lineCap = 'round';
+                ctx.shadowBlur = 14; ctx.shadowColor = '#ec4899';
+                ctx.stroke();
+            }
+
+            // 2. P2 弧度线 (绿色炫彩龙身)
+            if (p1Ratio < 1) {
+                ctx.beginPath();
+                ctx.arc(cx, cy, radius, (-Math.PI/2) + (Math.PI * 2 * p1Ratio), Math.PI * 1.5);
+                ctx.strokeStyle = '#10b981';
+                ctx.lineWidth = thickness;
+                ctx.lineCap = 'round';
+                ctx.shadowBlur = 14; ctx.shadowColor = '#10b981';
+                ctx.stroke();
+            }
+
+            ctx.shadowBlur = 0; // 重置阴影发光
+
+            // 3. 核心倒计时数字渲染
+            let mins = Math.floor(timeLeft / 60);
+            let secs = timeLeft % 60;
+            let timeStr = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+
+            ctx.fillStyle = '#f8fafc';
+            ctx.font = 'bold 36px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(timeStr, cx, cy - 10);
+
+            ctx.fillStyle = '#64748b';
+            ctx.font = '12px sans-serif';
+            ctx.fillText('剩余时间', cx, cy + 24);
+        }
+
+        init();
+    </script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+<<<<<<< HEAD
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🐍 双人联机贪吃蛇大决战</title>
@@ -392,3 +393,305 @@
     </script>
 </body>
 </html>
+=======
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🐍 双人联机贪吃蛇大决战</title>
+<style>
+:root {
+    --bg-color: #0f172a; --card-bg: #1e293b; --text-main: #f8fafc; --text-muted: #94a3b8;
+    --primary: #3b82f6; --p1-color: #ec4899; --p2-color: #10b981;
+}
+* { box-sizing: border-box; margin:0; padding:0; }
+body { font-family:sans-serif; background-color: var(--bg-color); color: var(--text-main); padding:20px; display:flex; flex-direction:column; align-items:center; }
+.container { width:100%; max-width:640px; }
+.view { display:none; }
+.view.active { display:block; }
+.card { background:var(--card-bg); border:1px solid #334155; border-radius:16px; padding:24px; margin-bottom:20px; }
+button { padding:12px 24px; color:white; background:linear-gradient(135deg,#3b82f6,#2563eb); border:none; border-radius:12px; cursor:pointer; }
+.btn-secondary { background:#334155; margin-bottom:20px; }
+.room-item { display:flex; justify-content:space-between; align-items:center; padding:14px; background:#111827; border-radius:10px; margin-top:10px; }
+.badge { padding:4px 8px; font-size:0.75rem; font-weight:bold; border-radius:6px; }
+.score-board { display:flex; justify-content:space-between; margin:15px 0; font-size:1.1rem; font-weight:bold; }
+#canvas-container { display:flex; justify-content:center; margin:20px 0; }
+canvas { background:#020617; border:4px solid #334155; border-radius:12px; box-shadow:0 10px 15px -3px rgba(0,0,0,0.5); }
+#game-status { text-align:center; font-size:1.2rem; font-weight:bold; margin:10px 0; color:#f59e0b; }
+.controls { display:grid; grid-template-columns:repeat(3,100px); grid-template-rows:repeat(2,60px); gap:10px; justify-content:center; margin-top:20px; }
+.controls button { padding:0; font-size:1.5rem; background:#334155; }
+.controls .up { grid-column:2; }
+.controls .left { grid-column:1; grid-row:2; }
+.controls .down { grid-column:2; grid-row:2; }
+.controls .right { grid-column:3; grid-row:2; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="container">
+    <div id="view-lobby" class="view">
+        <button class="btn-secondary" onclick="window.location.href='/'">← 返回主页</button>
+        <div class="card">
+            <h2>🐍 双人实时对战贪吃蛇</h2>
+            <p>极速长连接支持！使用键盘 <b>W A S D</b> 或 <b>↑ ↓ ← →</b> 控制方向，粉色是房主，绿色是挑战者，撞墙、撞到对方或撞到自己即输！</p>
+        </div>
+        <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                <h3>🏠 活跃房间</h3>
+                <button onclick="createRoom()">+ 创建房间</button>
+            </div>
+            <ul id="room-list"></ul>
+        </div>
+    </div>
+
+    <div id="view-game" class="view">
+        <button class="btn-secondary" onclick="window.location.href='/snake.html'">← 退出房间</button>
+        <div class="card">
+            <h2 id="game-title">游戏房间</h2>
+            <span id="player-identity" class="badge" style="background:#334155; margin-bottom:10px; display:inline-block;"></span>
+            <div class="score-board">
+                <span style="color:var(--p1-color)">房主 P1 长度: <span id="p1-score">3</span></span>
+                <span style="color:var(--p2-color)">挑战者 P2 长度: <span id="p2-score">3</span></span>
+            </div>
+            <div id="game-status">正在建立连接...</div>
+            <div style="text-align:center;margin:15px 0;">
+                <button id="start-btn" onclick="startGame()" style="display:none;background:#10b981;">🚀 开始游戏</button>
+            </div>
+            <div id="canvas-container">
+                <canvas id="gameCanvas" width="400" height="400"></canvas>
+            </div>
+            <div class="controls">
+                <button class="up" onclick="changeDirection('UP')">▲</button>
+                <button class="left" onclick="changeDirection('LEFT')">◀</button>
+                <button class="down" onclick="changeDirection('DOWN')">▼</button>
+                <button class="right" onclick="changeDirection('RIGHT')">▶</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://mamubvgmcetepllznifl.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_HEeNPSqD75cWlnmZjcVHKA_Pw-OdL_A';
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const gameId = 'snake';
+let myRole = null;
+let gameChannel = null;
+let gameTicker = null;
+let gameOver = false;
+
+const urlParams = new URLSearchParams(window.location.search);
+const roomId = urlParams.get('roomId');
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const grid = 20;
+
+let food = { x: 200, y: 200 };
+let snake1 = [{ x: 60, y:100 }, { x:40, y:100 }, { x:20, y:100 }];
+let snake2 = [{ x:320, y:280 }, { x:340, y:280 }, { x:360, y:280 }];
+let d1 = 'RIGHT', d2='LEFT';
+
+async function init() {
+    if(!roomId) {
+        document.getElementById('view-lobby').classList.add('active');
+        fetchRooms();
+    } else {
+        document.getElementById('view-game').classList.add('active');
+        document.getElementById('game-title').innerText = `房间 #${roomId}`;
+        myRole = localStorage.getItem(`room_${roomId}_role`);
+        await syncBaseRoomStatus();
+        if(SUPABASE_URL==='YOUR_SUPABASE_URL') {
+            document.getElementById('game-status').innerText='❌ 未配置 Supabase 密钥';
+            alert('请先配置 Supabase 密钥！');
+            return;
+        }
+        connectSupabaseRealtime();
+        setupKeyboardControls();
+        draw();
+    }
+}
+
+// 大厅逻辑
+async function fetchRooms() {
+    const ul = document.getElementById('room-list');
+    ul.innerHTML='<p style="text-align:center;">玩家正在热身，正在呼叫房间...</p>';
+    const res = await fetch(`/api/room?action=list&gameId=${gameId}&_t=${Date.now()}`);
+    const rooms = await res.json();
+    ul.innerHTML = rooms.length===0?'<p style="text-align:center;color:#64748b;">没有探查到房间，你来当第一个房主吧！</p>':'';
+    rooms.forEach(r=>{
+        const li=document.createElement('li');
+        li.className='room-item';
+        li.innerHTML=`<div><strong>房间 #${r.id}</strong></div>
+            <button style="padding:6px 14px;" onclick="window.location.href='?roomId=${r.id}'" ${r.status!=='waiting'?'disabled':''}>加入PK</button>`;
+        ul.appendChild(li);
+    });
+}
+
+async function createRoom() {
+    const res = await fetch('/api/room?action=create',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({gameId})});
+    const data = await res.json();
+    localStorage.setItem(`room_${data.roomId}_role`,'p1');
+    window.location.href=`?roomId=${data.roomId}`;
+}
+
+async function syncBaseRoomStatus() {
+    const res = await fetch(`/api/room?action=status&roomId=${roomId}&gameId=${gameId}&_t=${Date.now()}`);
+    if(res.status===404){ alert('房间不存在'); window.location.href='/snake.html'; return; }
+    const room = await res.json();
+    if(!myRole){
+        if(!room.p1) myRole='p1';
+        else if(!room.p2) myRole='p2';
+        else myRole='audience';
+        localStorage.setItem(`room_${roomId}_role`,myRole);
+    }
+    document.getElementById('player-identity').innerText={
+        'p1':'⚡ 房主 (P1) · 粉蛇',
+        'p2':'🎯 挑战者 (P2) · 绿蛇',
+        'audience':'👁️ 观众'
+    }[myRole];
+
+    if(room.status==='waiting' && myRole==='p2' && room.p2!=='joined'){
+        await fetch('/api/room?action=join',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({roomId,gameId})});
+        setTimeout(()=>{
+            gameChannel.send({ type:'broadcast', event:'player-joined', payload:{ player:'p2' } });
+        },500);
+    }
+}
+
+function connectSupabaseRealtime() {
+    gameChannel = supabaseClient.channel(`snake-room-${roomId}`);
+    gameChannel
+        .on('broadcast',{ event:'direction-update' },payload=>{
+            const data = payload.payload;
+            if(data.player==='p1') d1=data.dir;
+            if(data.player==='p2') d2=data.dir;
+        })
+        .on('broadcast',{ event:'food-update' },payload=>{
+            food = payload.payload.food;
+        })
+        .on('broadcast',{ event:'player-joined' },()=>{
+            if(myRole==='p1'){
+                document.getElementById('game-status').innerText='🎯 挑战者已加入';
+                document.getElementById('start-btn').style.display='inline-block';
+            }
+        })
+        .on('broadcast',{ event:'game-started' },()=>{ beginGame(); })
+        .subscribe(status=>{
+            if(status==='SUBSCRIBED') checkRoomStateAndRun();
+        });
+}
+
+async function startGame() {
+    if(myRole!=='p1') return;
+    document.getElementById('start-btn').disabled=true;
+    await fetch('/api/room?action=start',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ roomId, gameId }) });
+    gameChannel.send({ type:'broadcast', event:'game-started', payload:{} });
+    beginGame();
+}
+
+function beginGame() {
+    document.getElementById('game-status').innerText='🟢 激战中！';
+    if(gameTicker) clearInterval(gameTicker);
+    gameTicker=setInterval(gameLoop,150);
+    if(myRole==='p1') generateAndBroadcastFood();
+}
+
+function checkRoomStateAndRun(){
+    const statusText=document.getElementById('game-status');
+    statusText.innerText='⏳ 等待挑战者加入房间...';
+}
+
+function setupKeyboardControls(){
+    document.addEventListener('keydown',(e)=>{
+        if(gameOver || (myRole!=='p1' && myRole!=='p2')) return;
+        let requestedDir=null;
+        if(e.key==='w'||e.key==='ArrowUp') requestedDir='UP';
+        if(e.key==='s'||e.key==='ArrowDown') requestedDir='DOWN';
+        if(e.key==='a'||e.key==='ArrowLeft') requestedDir='LEFT';
+        if(e.key==='d'||e.key==='ArrowRight') requestedDir='RIGHT';
+        if(requestedDir) changeDirection(requestedDir);
+    });
+}
+
+function changeDirection(newDir){
+    let currentDir=myRole==='p1'?d1:d2;
+    if(newDir==='UP' && currentDir==='DOWN') return;
+    if(newDir==='DOWN' && currentDir==='UP') return;
+    if(newDir==='LEFT' && currentDir==='RIGHT') return;
+    if(newDir==='RIGHT' && currentDir==='LEFT') return;
+
+    if(myRole==='p1') d1=newDir;
+    if(myRole==='p2') d2=newDir;
+    gameChannel.send({ type:'broadcast', event:'direction-update', payload:{ player:myRole, dir:newDir } });
+}
+
+function generateAndBroadcastFood(){
+    food={ x:Math.floor(Math.random()*(canvas.width/grid))*grid, y:Math.floor(Math.random()*(canvas.height/grid))*grid };
+    gameChannel.send({ type:'broadcast', event:'food-update', payload:{ food } });
+}
+
+function gameLoop(){
+    if(gameOver) return;
+    let p1Head={ x:snake1[0].x, y:snake1[0].y };
+    if(d1==='RIGHT') p1Head.x+=grid; if(d1==='LEFT') p1Head.x-=grid;
+    if(d1==='UP') p1Head.y-=grid; if(d1==='DOWN') p1Head.y+=grid;
+    let p2Head={ x:snake2[0].x, y:snake2[0].y };
+    if(d2==='RIGHT') p2Head.x+=grid; if(d2==='LEFT') p2Head.x-=grid;
+    if(d2==='UP') p2Head.y-=grid; if(d2==='DOWN') p2Head.y+=grid;
+
+    let p1Eats=(p1Head.x===food.x && p1Head.y===food.y);
+    let p2Eats=(p2Head.x===food.x && p2Head.y===food.y);
+
+    snake1.unshift(p1Head);
+    if(p1Eats){ document.getElementById('p1-score').innerText=snake1.length; if(myRole==='p1') generateAndBroadcastFood(); } else snake1.pop();
+    snake2.unshift(p2Head);
+    if(p2Eats){ document.getElementById('p2-score').innerText=snake2.length; } else snake2.pop();
+    checkCollisions();
+    draw();
+}
+
+function checkCollisions(){
+    const h1=snake1[0], h2=snake2[0];
+    let p1Dead=false, p2Dead=false;
+    if(h1.x<0 || h1.x>=canvas.width || h1.y<0 || h1.y>=canvas.height) p1Dead=true;
+    if(h2.x<0 || h2.x>=canvas.width || h2.y<0 || h2.y>=canvas.height) p2Dead=true;
+    snake1.forEach((part,i)=>{ if(i>0 && h1.x===part.x && h1.y===part.y) p1Dead=true; });
+    snake2.forEach(part=>{ if(h1.x===part.x && h1.y===part.y) p1Dead=true; });
+    snake2.forEach((part,i)=>{ if(i>0 && h2.x===part.x && h2.y===part.y) p2Dead=true; });
+    snake1.forEach(part=>{ if(h2.x===part.x && h2.y===part.y) p2Dead=true; });
+    if(p1Dead || p2Dead){ gameOver=true; clearInterval(gameTicker);
+        const statusText=document.getElementById('game-status');
+        if(p1Dead && p2Dead) statusText.innerText='💥 平局！';
+        else if(p1Dead) { statusText.innerText='🎉 P2 获胜！'; archiveWinner('p2'); }
+        else if(p2Dead) { statusText.innerText='🎉 P1 获胜！'; archiveWinner('p1'); }
+    }
+}
+
+function archiveWinner(winner){
+    if(myRole===winner){
+        fetch('/api/room?action=click',{
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({ roomId, gameId, player:myRole, totalClicks:30 })
+        });
+    }
+}
+
+function draw(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.strokeStyle='#1e293b';
+    for(let i=0;i<canvas.width;i+=grid){ ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,canvas.height); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(canvas.width,i); ctx.stroke();
+    }
+    ctx.fillStyle='#ef4444'; ctx.shadowBlur=10; ctx.shadowColor='#ef4444';
+    ctx.fillRect(food.x,food.y,grid-2,grid-2); ctx.shadowBlur=0;
+    ctx.fillStyle='#ec4899';
+    snake1.forEach((part,i)=>{ ctx.fillStyle=i===0?'#f472b6':'#ec4899'; ctx.fillRect(part.x,part.y,grid-2,grid-2); });
+    ctx.fillStyle='#10b981';
+    snake2.forEach((part,i)=>{ ctx.fillStyle=i===0?'#34d399':'#10b981'; ctx.fillRect(part.x,part.y,grid-2,grid-2); });
+}
+
+init();
+</script>
+</body>
+</html>
+>>>>>>> 02350664debeebb03f9c9046e441d74bd2b5e405
