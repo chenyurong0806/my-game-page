@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>✌️ 剪刀石头布（Supabase 毫秒级对战版）</title>
+    <title>剪刀石头布</title>
     <style>
         :root { 
             --bg-color: #0f172a; 
@@ -70,7 +70,6 @@
             <button class="btn-secondary" onclick="window.location.href='/'">← 返回主页</button>
             <div class="card">
                 <h2>✌️ 剪刀石头布大赛</h2>
-                <p>⚡ 接入 Supabase Realtime：不再需要傻傻轮询，出拳瞬间送达对手屏幕！</p>
             </div>
             <div class="card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
@@ -120,7 +119,7 @@
                     <p id="p2-state">挑战者 (P2)：未出拳</p>
                 </div>
 
-                <button id="btn-restart" class="btn-restart" onclick="playAgain()">🔄 再来一局</button>
+                <button id="btn-restart" class="btn-restart" onclick="playAgain()">↻ 再来一局</button>
             </div>
         </div>
     </div>
@@ -200,7 +199,7 @@
                 localStorage.setItem(`room_${roomId}_role`, myRole);
             }
 
-            document.getElementById('player-identity').innerText = { 'p1': '⚡ 房主 (P1)', 'p2': '🎯 挑战者 (P2)', 'audience': '👁️ 观众' }[myRole];
+            document.getElementById('player-identity').innerText = { 'p1': '房主 (P1)', 'p2': '挑战者 (P2)', 'audience': '观众' }[myRole];
             
             if (room.status === 'waiting' && myRole === 'p2' && room.p2 !== 'joined') {
                 await fetch('/api/room?action=join', {
@@ -229,12 +228,12 @@
                 })
                 // 2. 监听“再来一局”广播
                 .on('broadcast', { event: 'next-round' }, () => {
-                    console.log("🔄 收到下一局开始指令");
+                    console.log("↻ 收到下一局开始指令");
                     resetRoundState();
                 })
                 .subscribe((status) => {
                     if (status === 'SUBSCRIBED') {
-                        document.getElementById('game-status').innerText = '🎴 实时信道连通！请出拳...';
+                        document.getElementById('game-status').innerText = '请出拳...';
                         if (myRole === 'p1' || myRole === 'p2') {
                             enableButtons(true);
                         }
@@ -266,7 +265,7 @@
                 // ⚡ 双方皆出拳，进入高能悬念动画阶段！
                 triggerBattleAnimation();
             } else if (p1Choice > 0 || p2Choice > 0) {
-                statusText.innerText = '⚔️ 有人已经出拳！博弈博弈...';
+                statusText.innerText = '对方已出拳';
             }
         }
 
@@ -305,7 +304,7 @@
 
                     // 3. 结果判定
                     if (p1Choice === p2Choice) {
-                        statusText.innerText = '🤝 竟然平局了！';
+                        statusText.innerText = '竟然平局了！';
                     } else if ((p1Choice === 1 && p2Choice === 2) || (p1Choice === 2 && p2Choice === 3) || (p1Choice === 3 && p2Choice === 1)) {
                         statusText.innerText = '🎉 房主 (P1) 获胜！';
                         p1Score++;
@@ -352,7 +351,7 @@
             isAnimating = false;
             
             document.getElementById('btn-restart').style.display = 'none';
-            document.getElementById('game-status').innerText = '🎴 新一局开始，请出拳...';
+            document.getElementById('game-status').innerText = '新一局开始，请出拳...';
             
             if (myRole === 'p1' || myRole === 'p2') {
                 enableButtons(true);
