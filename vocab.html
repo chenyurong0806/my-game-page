@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🐉 单词吞噬战 | 高级无遮挡复习版</title>
+    <title>🐉 单词吞噬战</title>
     <style>
         :root { --bg-color: #090d16; --card-bg: #151f32; --text-main: #f8fafc; --text-muted: #64748b; --primary: #3b82f6; --p1-color: #ec4899; --p2-color: #10b981; }
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -191,7 +191,7 @@
 
         async function loadVocabulary() {
             try {
-                const res = await fetch('/GaoKao_3500.json');
+                const res = await fetch('/GRE_1500.json');
                 const rawData = await res.json();
                 
                 fullDictionary = rawData.filter(item => item && item.name && item.trans && item.trans.length > 0).map(item => {
