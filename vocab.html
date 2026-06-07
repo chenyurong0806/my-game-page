@@ -339,7 +339,6 @@
                     answer: correctIdx 
                 };
             });
-        };
         
             // 云端修改 playing 标志锁住房间，防止其他人再进来
             fetch('/api/room?action=click', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomId, gameId, player: 'p1', totalClicks: 1 }) });
@@ -352,13 +351,7 @@
             startLocalGame();
         }
 
-            // 云端修改playing标志锁住房间
-            fetch('/api/room?action=click', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomId, gameId, player: 'p1', totalClicks: 1 }) });
-
-            // 广播
-            gameChannel.send({ type: 'broadcast', event: 'game-start-broadcast', payload: { words: finalPayloadWords } });
-        }
-
+        
         function startLocalGame() {
             isGameOver = false;
             currentIdx = 0;
