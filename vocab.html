@@ -191,7 +191,7 @@
 
         async function loadVocabulary() {
             try {
-                const res = await fetch('/3000_ClassRoom_English_Words.json');
+                const res = await fetch('/hard.json');
                 const rawData = await res.json();
                 
                 fullDictionary = rawData.filter(item => item && item.name && item.trans && item.trans.length > 0).map(item => {
