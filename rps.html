@@ -3,21 +3,64 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>✌️ 剪刀石头布（Supabase 毫秒级对战版）</title>
+    <title>剪刀石头布</title>
     <style>
-        :root { --bg-color: #0f172a; --card-bg: #1e293b; --text-main: #f8fafc; --text-muted: #94a3b8; --primary: #3b82f6; }
+        :root { 
+            --bg-color: #0f172a; 
+            --card-bg: #1e293b; 
+            --text-main: #f8fafc; 
+            --text-muted: #94a3b8; 
+            --primary: #3b82f6; 
+            --accent: #f59e0b;
+            --success: #10b981;
+        }
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: sans-serif; background-color: var(--bg-color); color: var(--text-main); padding: 40px 20px; display: flex; flex-direction: column; align-items: center; }
+        body { font-family: system-ui, -apple-system, sans-serif; background-color: var(--bg-color); color: var(--text-main); padding: 40px 20px; display: flex; flex-direction: column; align-items: center; }
         .container { width: 100%; max-width: 640px; }
         .view { display: none; }
         .view.active { display: block; }
-        .card { background: var(--card-bg); border: 1px solid #334155; border-radius: 16px; padding: 24px; margin-bottom: 20px; }
-        button { padding: 12px 24px; color: white; background: linear-gradient(135deg, #3b82f6, #2563eb); border: none; border-radius: 12px; cursor: pointer; margin: 5px; }
+        .card { background: var(--card-bg); border: 1px solid #334155; border-radius: 16px; padding: 24px; margin-bottom: 20px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3); }
+        
+        /* 按钮美化 */
+        button { padding: 12px 24px; color: white; background: linear-gradient(135deg, #3b82f6, #2563eb); border: none; border-radius: 12px; cursor: pointer; margin: 5px; font-weight: 600; transition: all 0.2s; }
+        button:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4); }
+        button:disabled { background: #334155; color: #64748b; cursor: not-allowed; transform: none; }
         .btn-secondary { background: #334155; margin-bottom: 20px; }
+        .btn-restart { background: linear-gradient(135deg, var(--success), #059669); width: 100%; margin-top: 20px; padding: 14px; font-size: 1.1rem; display: none; }
+        
         .room-item { display: flex; justify-content: space-between; align-items: center; padding: 14px; background: #111827; border-radius: 10px; margin-top: 10px; }
-        .choice-btn { font-size: 2rem; padding: 20px; width: 30%; }
-        #game-status { text-align: center; font-size: 1.2rem; font-weight: bold; margin: 20px 0; color: #f59e0b; }
-        .badge { padding: 4px 8px; font-size: 0.75rem; font-weight: bold; border-radius: 6px; background: #334155;}
+        .choice-btn { font-size: 2.5rem; padding: 15px; width: 30%; background: #1e293b; border: 2px solid #334155; transition: all 0.2s; }
+        .choice-btn:hover:not(:disabled) { background: #2d3748; border-color: var(--primary); }
+        
+        #game-status { text-align: center; font-size: 1.3rem; font-weight: bold; margin: 20px 0; color: var(--accent); min-height: 32px; }
+        .badge { padding: 6px 12px; font-size: 0.85rem; font-weight: bold; border-radius: 6px; background: #334155;}
+        
+        /* 👑 优化 UI：全新精美计分板 */
+        .scoreboard { display: flex; justify-content: space-around; align-items: center; background: #0f172a; padding: 15px; border-radius: 12px; margin: 20px 0; border: 1px solid #334155; }
+        .score-team { text-align: center; flex: 1; }
+        .score-team .role-name { font-size: 0.9rem; color: var(--text-muted); margin-bottom: 5px; }
+        .score-team .score-num { font-size: 2.5rem; font-weight: 800; color: var(--text-main); font-family: monospace; }
+        .score-divider { font-size: 1.8rem; color: #475569; font-weight: bold; padding: 0 10px; }
+
+        /* 🎬 悬念出拳大对决区域 */
+        .battle-arena { display: flex; justify-content: space-around; align-items: center; background: #111827; border-radius: 12px; padding: 30px 10px; margin: 25px 0; min-height: 160px; position: relative; overflow: hidden; border: 1px dashed #334155; }
+        .battle-hand { font-size: 4.5rem; transition: transform 0.1s; display: inline-block; user-select: none; }
+        .vs-text { font-size: 1.5rem; font-weight: 800; color: #475569; font-style: italic; }
+
+        /* 🔄 摇晃动画：增加博弈悬念感 */
+        @keyframes shakeP1 {
+            0%, 100% { transform: translateY(0) rotate(15deg); }
+            50% { transform: translateY(-30px) rotate(-10deg); }
+        }
+        @keyframes shakeP2 {
+            0%, 100% { transform: translateY(0) scaleX(-1) rotate(15deg); }
+            50% { transform: translateY(-30px) scaleX(-1) rotate(-10deg); }
+        }
+        .anim-shake-p1 { animation: shakeP1 0.4s infinite ease-in-out; }
+        .anim-shake-p2 { animation: shakeP2 0.4s infinite ease-in-out; }
+        
+        /* P2手势默认水平翻转，看起来像对决 */
+        .p2-flip { transform: scaleX(-1); }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -27,7 +70,6 @@
             <button class="btn-secondary" onclick="window.location.href='/'">← 返回主页</button>
             <div class="card">
                 <h2>✌️ 剪刀石头布大赛</h2>
-                <p>⚡ 接入 Supabase Realtime：不再需要傻傻轮询，出拳瞬间送达对手屏幕！</p>
             </div>
             <div class="card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
@@ -41,10 +83,30 @@
         <div id="view-game" class="view">
             <button class="btn-secondary" onclick="window.location.href='/rps.html'">← 退出房间</button>
             <div class="card">
-                <h2 id="game-title">游戏房间</h2>
-                <span id="player-identity" class="badge"></span>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <h2 id="game-title">游戏房间</h2>
+                    <span id="player-identity" class="badge"></span>
+                </div>
+
+                <div class="scoreboard">
+                    <div class="score-team">
+                        <div class="role-name">房主 (P1)</div>
+                        <div id="p1-score" class="score-num">0</div>
+                    </div>
+                    <div class="score-divider">:</div>
+                    <div class="score-team">
+                        <div class="role-name">挑战者 (P2)</div>
+                        <div id="p2-score" class="score-num">0</div>
+                    </div>
+                </div>
                 
                 <div id="game-status">正在建立连接...</div>
+
+                <div class="battle-arena">
+                    <div id="p1-hand-display" class="battle-hand">⏳</div>
+                    <div class="vs-text">VS</div>
+                    <div id="p2-hand-display" class="battle-hand p2-flip">⏳</div>
+                </div>
 
                 <div style="display: flex; justify-content: space-between; margin-top: 20px;">
                     <button class="choice-btn" id="btn-1" onclick="makeChoice(1)" disabled>✊</button>
@@ -52,33 +114,36 @@
                     <button class="choice-btn" id="btn-3" onclick="makeChoice(3)" disabled>✋</button>
                 </div>
 
-                <div style="margin-top: 30px; color: var(--text-muted); text-align: center;">
+                <div style="margin-top: 20px; color: var(--text-muted); text-align: center; font-size: 0.9rem; display: none;">
                     <p id="p1-state">房主 (P1)：未出拳</p>
                     <p id="p2-state">挑战者 (P2)：未出拳</p>
                 </div>
+
+                <button id="btn-restart" class="btn-restart" onclick="playAgain()">↻ 再来一局</button>
             </div>
         </div>
     </div>
 
     <script>
-        // ⚡ 请把这里替换为你真实的 Supabase 项目 API 凭证
         const SUPABASE_URL = 'https://mamubvgmcetepllznifl.supabase.co'; 
         const SUPABASE_ANON_KEY = 'sb_publishable_HEeNPSqD75cWlnmZjcVHKA_Pw-OdL_A';
 
-        // 初始化 Supabase 客户端
         const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         const gameId = 'rps';
         let myRole = null;
-        let gameChannel = null; // 用于存放实时通信管道
+        let gameChannel = null;
 
-        // 记录游戏局内本地变量
+        // 核心对局变量
         let p1Choice = 0;
         let p2Choice = 0;
+        let p1Score = 0;
+        let p2Score = 0;
+        let isAnimating = false; // 锁，防止动画期间重复触发计算
 
         const urlParams = new URLSearchParams(window.location.search);
         const roomId = urlParams.get('roomId');
-        const choiceMap = { 0: '未出拳', 1: '✊ 石头', 2: '✌️ 剪刀', 3: '✋ 布' };
+        const choiceMap = { 0: '⏳', 1: '✊', 2: '✌️', 3: '✋' };
 
         async function init() {
             if (!roomId) {
@@ -89,15 +154,11 @@
                 document.getElementById('game-title').innerText = `房间 #${roomId}`;
                 myRole = localStorage.getItem(`room_${roomId}_role`);
                 
-                // 1. 先通过 Cloudflare 后端建立并同步房间基础状态
                 await syncBaseRoomStatus();
-
-                // 2. ✨ 核心亮点：连接 Supabase 管道并监听
                 connectSupabaseRealtime();
             }
         }
 
-        // 依旧利用原有后端获取活跃房间
         async function fetchRooms() {
             const ul = document.getElementById('room-list');
             ul.innerHTML = '<p style="text-align:center;">正在探测房间...</p>';
@@ -115,7 +176,6 @@
             });
         }
 
-        // 依旧利用原有后端创建房间
         async function createRoom() {
             const res = await fetch('/api/room?action=create', {
                 method: 'POST',
@@ -127,7 +187,6 @@
             window.location.href = `?roomId=${data.roomId}`;
         }
 
-        // 用原接口确定玩家身份并处理 P2 加入房间
         async function syncBaseRoomStatus() {
             const res = await fetch(`/api/room?action=status&roomId=${roomId}&gameId=${gameId}&_t=${Date.now()}`);
             if (res.status === 404) { alert('房间已解散'); window.location.href = '/rps.html'; return; }
@@ -140,7 +199,7 @@
                 localStorage.setItem(`room_${roomId}_role`, myRole);
             }
 
-            document.getElementById('player-identity').innerText = { 'p1': '⚡ 房主 (P1)', 'p2': '🎯 挑战者 (P2)', 'audience': '👁️ 观众' }[myRole];
+            document.getElementById('player-identity').innerText = { 'p1': '房主 (P1)', 'p2': '挑战者 (P2)', 'audience': '观众' }[myRole];
             
             if (room.status === 'waiting' && myRole === 'p2' && room.p2 !== 'joined') {
                 await fetch('/api/room?action=join', {
@@ -151,73 +210,164 @@
             }
         }
 
-        // ⚡ 建立 Supabase 实时专属信道
+        // ⚡ 建立 Supabase 实时专属信道并监听多个事件
         function connectSupabaseRealtime() {
-            // 给当前房间创建一条专属的通信管道 (用房间ID命名)
             gameChannel = supabaseClient.channel(`game-room-${roomId}`);
 
-            // 监听这条管道内所有人广播的 "player-move" 事件
             gameChannel
+                // 1. 监听出拳广播
                 .on('broadcast', { event: 'player-move' }, (payload) => {
+                    if (isAnimating) return; // 如果正在开奖动画中，不接收重叠数据
                     const data = payload.payload;
-                    console.log("⚡ 毫秒级收到广播数据:", data);
+                    console.log("⚡ 收到出拳数据:", data);
 
-                    // 收到数据后更新网页上的分数状态
                     if (data.player === 'p1') p1Choice = data.choice;
                     if (data.player === 'p2') p2Choice = data.choice;
 
-                    // 刷新画面
                     renderGameUI();
+                })
+                // 2. 监听“再来一局”广播
+                .on('broadcast', { event: 'next-round' }, () => {
+                    console.log("↻ 收到下一局开始指令");
+                    resetRoundState();
                 })
                 .subscribe((status) => {
                     if (status === 'SUBSCRIBED') {
-                        document.getElementById('game-status').innerText = '🎴 实时信道连通！请出拳...';
-                        // 连通成功后，且自己不是观众，则允许按键
+                        document.getElementById('game-status').innerText = '请出拳...';
                         if (myRole === 'p1' || myRole === 'p2') {
                             enableButtons(true);
                         }
+                        renderGameUI();
                     }
                 });
         }
 
-        // 刷新对战页面的判定结果
+        // 刷新对战页面及判定结果
         function renderGameUI() {
             const statusText = document.getElementById('game-status');
+            const p1Hand = document.getElementById('p1-hand-display');
+            const p2Hand = document.getElementById('p2-hand-display');
             
-            // 盲盒渲染：如果你出了，对手没出，只显示“已出拳”，不能透视答案
-            document.getElementById('p1-state').innerText = `房主 (P1)：${p1Choice > 0 ? (p2Choice > 0 ? choiceMap[p1Choice] : '👍 已出拳') : '⏳ 思考中'}`;
-            document.getElementById('p2-state').innerText = `挑战者 (P2)：${p2Choice > 0 ? (p1Choice > 0 ? choiceMap[p2Choice] : '👍 已出拳') : '⏳ 思考中'}`;
+            // 文本底层状态记录（保留后台映射）
+            document.getElementById('p1-state').innerText = `房主 (P1)：${p1Choice > 0 ? '👍 已出拳' : '⏳ 思考中'}`;
+            document.getElementById('p2-state').innerText = `挑战者 (P2)：${p2Choice > 0 ? '👍 已出拳' : '⏳ 思考中'}`;
 
-            // 当两个人都通过 Supabase 管道发了数据后，前端直接零延迟裁决
-            if (p1Choice > 0 && p2Choice > 0) {
-                enableButtons(false);
-                if (p1Choice === p2Choice) {
-                    statusText.innerText = '🤝 竟然平局了！';
-                } else if ((p1Choice === 1 && p2Choice === 2) || (p1Choice === 2 && p2Choice === 3) || (p1Choice === 3 && p2Choice === 1)) {
-                    statusText.innerText = '🎉 房主 (P1) 获胜！';
-                } else {
-                    statusText.innerText = '🎉 挑战者 (P2) 获胜！';
-                }
+            // 竞技场手势的盲盒状态渲染
+            if (!isAnimating) {
+                p1Hand.innerText = p1Choice > 0 ? '✔️' : '⏳';
+                p2Hand.innerText = p2Choice > 0 ? '✔️' : '⏳';
+                // 恢复原方向
+                p1Hand.className = "battle-hand";
+                p2Hand.className = "battle-hand p2-flip";
             }
+
+            if (p1Choice > 0 && p2Choice > 0 && !isAnimating) {
+                // ⚡ 双方皆出拳，进入高能悬念动画阶段！
+                triggerBattleAnimation();
+            } else if (p1Choice > 0 || p2Choice > 0) {
+                statusText.innerText = '对方已出拳';
+            }
+        }
+
+        // 🎬 核心动效：摇摆悬念蓄力，延迟揭晓答案
+        function triggerBattleAnimation() {
+            isAnimating = true;
+            enableButtons(false);
+            
+            const statusText = document.getElementById('game-status');
+            const p1Hand = document.getElementById('p1-hand-display');
+            const p2Hand = document.getElementById('p2-hand-display');
+
+            // 1. 全体蓄力，手势统一换回 ✊ 开始剧烈摇晃
+            p1Hand.innerText = '✊';
+            p2Hand.innerText = '✊';
+            p1Hand.classList.add('anim-shake-p1');
+            p2Hand.classList.add('anim-shake-p2');
+
+            let countdown = 3;
+            statusText.innerText = `石头剪刀布... ${countdown}`;
+
+            // 倒计时定格悬念
+            const interval = setInterval(() => {
+                countdown--;
+                if (countdown > 0) {
+                    statusText.innerText = `石头剪刀布... ${countdown}`;
+                } else {
+                    clearInterval(interval);
+                    
+                    // 2. 动画结束，移除摇晃样式，瞬间亮牌
+                    p1Hand.classList.remove('anim-shake-p1');
+                    p2Hand.classList.remove('anim-shake-p2');
+                    
+                    p1Hand.innerText = choiceMap[p1Choice];
+                    p2Hand.innerText = choiceMap[p2Choice];
+
+                    // 3. 结果判定
+                    if (p1Choice === p2Choice) {
+                        statusText.innerText = '竟然平局了！';
+                    } else if ((p1Choice === 1 && p2Choice === 2) || (p1Choice === 2 && p2Choice === 3) || (p1Choice === 3 && p2Choice === 1)) {
+                        statusText.innerText = '🎉 房主 (P1) 获胜！';
+                        p1Score++;
+                    } else {
+                        statusText.innerText = '🎉 挑战者 (P2) 获胜！';
+                        p2Score++;
+                    }
+
+                    // 4. 更新计分板
+                    document.getElementById('p1-score').innerText = p1Score;
+                    document.getElementById('p2-score').innerText = p2Score;
+
+                    // 5. 显示再来一局按钮 (仅对非观众玩家显示)
+                    if (myRole === 'p1' || myRole === 'p2') {
+                        document.getElementById('btn-restart').style.display = 'block';
+                    }
+                    isAnimating = false;
+                }
+            }, 500); // 没0.5秒跃动一次，共1.5秒悬念时间
         }
 
         // 玩家点击出拳
         function makeChoice(value) {
-            if (myRole !== 'p1' && myRole !== 'p2') return;
+            if (myRole !== 'p1' && myRole !== 'p2' || isAnimating) return;
 
-            // 本地更新自己的状态
             if (myRole === 'p1') p1Choice = value;
             if (myRole === 'p2') p2Choice = value;
 
-            // 先刷新一次本地画面
             renderGameUI();
             enableButtons(false);
 
-            // ⚡ 核心魔法：把自己的出拳通过管道瞬间发给对方！
+            // 发送数据广播
             gameChannel.send({
                 type: 'broadcast',
                 event: 'player-move',
                 payload: { player: myRole, choice: value }
+            });
+        }
+
+        // 🔄 本地及远端状态重置
+        function resetRoundState() {
+            p1Choice = 0;
+            p2Choice = 0;
+            isAnimating = false;
+            
+            document.getElementById('btn-restart').style.display = 'none';
+            document.getElementById('game-status').innerText = '新一局开始，请出拳...';
+            
+            if (myRole === 'p1' || myRole === 'p2') {
+                enableButtons(true);
+            }
+            renderGameUI();
+        }
+
+        // 发起“再来一局”
+        function playAgain() {
+            resetRoundState();
+            
+            // 广播通知对方重置数据
+            gameChannel.send({
+                type: 'broadcast',
+                event: 'next-round',
+                payload: {}
             });
         }
 
